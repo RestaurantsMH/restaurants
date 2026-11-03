@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Mesa">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#161211" id="themeColor">
+<title>Mesa</title>
+<style>
+:root {
+  --bg: #161211; --card: #201a18; --ink: #f6f0ea; --muted: #a89e96; --line: #342b28;
+  --acc: #e8805a; --onacc: #1a0f0a; --soft: #2d2421;
+  --good: #6fd08c; --good-soft: #17301f; --warn: #f0b04b; --warn-soft: #3a2d16; --danger: #f2788a;
+}
+:root[data-theme="light"] {
+  --bg: #f7f2ec; --card: #ffffff; --ink: #231b17; --muted: #7a6e66; --line: #e6ddd3;
+  --acc: #c2552d; --onacc: #ffffff; --soft: #efe6dc;
+  --good: #1f7a3d; --good-soft: #dcf3e3; --warn: #a45d0a; --warn-soft: #fbe9cc; --danger: #b4233a;
+}
+@media (prefers-color-scheme: light) {
+  :root[data-theme="auto"] {
+    --bg: #f7f2ec; --card: #ffffff; --ink: #231b17; --muted: #7a6e66; --line: #e6ddd3;
+    --acc: #c2552d; --onacc: #ffffff; --soft: #efe6dc;
+    --good: #1f7a3d; --good-soft: #dcf3e3; --warn: #a45d0a; --warn-soft: #fbe9cc; --danger: #b4233a;
+  }
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+body { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+button { font: inherit; color: inherit; cursor: pointer; }
+input, select, textarea { font: inherit; color: inherit; }
+a { color: var(--acc); }
+.wrap { max-width: 560px; margin: 0 auto; padding: calc(10px + env(safe-area-inset-top)) 16px 0; }
+.muted { color: var(--muted); }
+.mu { font-size: 13px; color: var(--muted); }
+.stack > * + * { margin-top: 10px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; }
+.card h3 { margin: 0 0 6px; font-size: 15px; }
+.hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 2px 10px; }
+.hd h1 { margin: 0; font-size: 24px; font-weight: 650; letter-spacing: .2px; }
+.pill { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 5px 11px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.pill.bad { color: var(--danger); border-color: var(--danger); }
+
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.scroll { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.scroll::-webkit-scrollbar { display: none; }
+.chip { flex: none; border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 8px 14px; font-size: 14px; }
+.chip.on { background: var(--acc); color: var(--onacc); border-color: var(--acc); font-weight: 600; }
+.chip small { opacity: .7; margin-left: 4px; }
+.search { width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 11px 12px; margin: 10px 0 8px; }
+.search:focus, .field:focus { outline: 2px solid var(--acc); outline-offset: -1px; }
+
+.rc { display: block; width: 100%; text-align: left; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; }
+.rc + .rc { margin-top: 8px; }
+.rc .top { display: flex; align-items: flex-start; gap: 8px; }
+.rc .nm { flex: 1; min-width: 0; }
+.rc .nm b { font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.rc .nm span { display: block; font-size: 13px; color: var(--muted); }
+.star { flex: none; border: 0; background: none; font-size: 24px; line-height: 1; padding: 2px 4px; color: var(--line); }
+.star.on { color: var(--acc); }
+.badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.badge { border-radius: 8px; padding: 2px 8px; font-size: 12px; background: var(--soft); color: var(--muted); }
+.badge.ok { background: var(--good-soft); color: var(--good); }
+.badge.warn { background: var(--warn-soft); color: var(--warn); }
+.badge.acc { background: var(--acc); color: var(--onacc); font-weight: 600; }
+.empty { color: var(--muted); font-size: 14px; padding: 14px 2px; margin: 0; text-align: center; }
+
+.nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--card); border-top: 1px solid var(--line); display: flex; padding-bottom: env(safe-area-inset-bottom); }
+.nav button { flex: 1; border: 0; background: none; padding: 8px 0 10px; font-size: 12px; color: var(--muted); position: relative; }
+.nav button i { display: block; font-size: 21px; line-height: 1.2; font-style: normal; }
+.nav button.on { color: var(--ink); font-weight: 600; }
+.nav .nb { position: absolute; top: 3px; left: 56%; background: var(--acc); color: var(--onacc); font-size: 11px; font-weight: 700; border-radius: 9px; min-width: 17px; height: 17px; line-height: 17px; }
+.fab { position: fixed; right: 18px; bottom: calc(86px + env(safe-area-inset-bottom)); z-index: 5; width: 56px; height: 56px; border-radius: 50%; border: 0; background: var(--acc); color: var(--onacc); font-size: 28px; line-height: 1; box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+
+.scrim { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 20; display: flex; align-items: flex-end; justify-content: center; }
+.sheet { width: 100%; max-width: 560px; max-height: 92vh; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 20px 20px 0 0; padding: 16px 16px calc(20px + env(safe-area-inset-bottom)); }
+.sheet h2 { margin: 0 0 2px; font-size: 20px; overflow-wrap: anywhere; }
+.row { display: flex; gap: 8px; }
+.field { width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-top: 4px; }
+textarea.field { min-height: 70px; resize: vertical; }
+.lbl { display: block; font-size: 12px; color: var(--muted); margin-top: 12px; }
+.btn { border-radius: 12px; background: var(--card); color: var(--ink); border: 1px solid var(--line); padding: 12px 16px; font-weight: 600; text-decoration: none; display: inline-block; text-align: center; }
+.btn.go { background: var(--acc); color: var(--onacc); border-color: var(--acc); }
+.btn.block { display: block; width: 100%; }
+.btn:disabled { opacity: .4; }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.actions .wide { grid-column: 1 / -1; }
+.note { border-radius: 12px; padding: 10px 12px; font-size: 14px; margin-top: 12px; background: var(--soft); }
+.note.warn { background: var(--warn-soft); color: var(--warn); }
+.note.ok { background: var(--good-soft); color: var(--good); }
+.msg { white-space: pre-wrap; font-size: 14px; background: var(--card); border: 1px dashed var(--line); border-radius: 12px; padding: 10px 12px; margin-top: 8px; }
+.step { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; }
+.step button { width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); font-size: 22px; }
+.step b { font-size: 20px; min-width: 40px; text-align: center; }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin-top: 4px; }
+.seg button { flex: 1; border: 0; background: var(--card); padding: 10px 4px; font-size: 14px; }
+.seg button.on { background: var(--acc); color: var(--onacc); font-weight: 600; }
+.checks { display: flex; gap: 14px; margin-top: 8px; }
+.checks label { display: flex; align-items: center; gap: 6px; }
+.bk { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+.bk + .bk { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; }
+.bk .when { font-size: 13px; color: var(--muted); }
+.grouphd { margin: 14px 2px 6px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+.okbox, .errbox { border-radius: 12px; padding: 9px 12px; margin-top: 8px; font-size: 13px; overflow-wrap: anywhere; }
+.okbox { background: var(--good-soft); color: var(--good); }
+.errbox { background: var(--warn-soft); color: var(--warn); }
+.toast { position: fixed; left: 0; right: 0; bottom: calc(92px + env(safe-area-inset-bottom)); z-index: 30; display: flex; justify-content: center; padding: 0 16px; pointer-events: none; }
+.toast > div { pointer-events: auto; background: var(--ink); color: var(--bg); border-radius: 12px; padding: 10px 14px; font-size: 14px; display: flex; gap: 12px; align-items: center; max-width: 520px; }
+.toast button { border: 0; background: none; color: var(--acc); font-weight: 700; padding: 0; }
+.back { border: 0; background: none; color: var(--muted); padding: 4px 0; font-size: 15px; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<div id="fabHost"></div>
+<nav class="nav" id="nav"></nav>
+<div id="overlay"></div>
+<div id="toast" class="toast"></div>
+
+<script>
+'use strict';
+/* ---------- helpers ---------- */
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const pad = n => String(n).padStart(2, '0');
+const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const today = () => ymd(new Date());
+const parseYmd = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const nextSaturday = () => { const d = new Date(); do d.setDate(d.getDate() + 1); while (d.getDay() !== 6); return ymd(d); };
+const safeUrl = u => /^https?:\/\/[^\s"'<>]+$/i.test(u || '') ? u : '';
+const telDigits = s => String(s || '').replace(/[^\d+]/g, '');
+const waDigits = s => String(s || '').replace(/\D/g, '');
+const dateLabel = (s, loc = 'en-GB') => parseYmd(s).toLocaleDateString(loc, { weekday: 'short', day: 'numeric', month: 'short' });
+
+const STORE_KEY = 'mesa.v1';
+const CITIES = ['Madrid', 'Costa Brava', 'Vienna'];
+const METHODS = ['CoverManager', 'Molzait', 'TheFork', 'Own website', 'Phone', 'WhatsApp', 'Email', 'Walk-in', 'Unknown'];
+const CARDS = [['Unknown', 'Not known yet'], ['No', 'No card needed'], ['Yes - guarantee', 'Card holds the table'], ['Yes - deposit', 'Deposit / prepayment']];
+const PRICES = ['', '€', '€€', '€€€', '€€€€'];
+const MEALS = ['Lunch', 'Dinner', 'Brunch'];
+
+/* ---------- state ---------- */
+function blank() { return { restaurants: [], at: 0, bookings: [], settings: { baseUrl: '', appKey: '', theme: 'dark', name: '', phone: '' }, status: {}, demo: false }; }
+function load() {
+  try { const o = JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); const s = Object.assign(blank(), o); s.settings = Object.assign(blank().settings, o.settings); return s; }
+  catch { return blank(); }
+}
+function save() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); }
+  catch { toast('Could not save: browser storage is full or blocked.'); }
+}
+let S = load();
+let view = 'places', city = 'All', q = '', favOnly = false, readyOnly = false, loading = false;
+
+function applyTheme() {
+  const t = ['dark', 'light', 'auto'].includes(S.settings.theme) ? S.settings.theme : 'dark';
+  document.documentElement.dataset.theme = t;
+  const light = t === 'light' || (t === 'auto' && window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches);
+  $('themeColor').setAttribute('content', light ? '#f7f2ec' : '#161211');
+}
+
+/* ---------- Worker access ---------- */
+function baseUrl() { const b = (S.settings.baseUrl || '').trim().replace(/\/$/, ''); return /^https?:\/\//.test(b) ? b : null; }
+async function api(path, opts = {}) {
+  const base = baseUrl();
+  if (base === null) throw new Error('Enter your Worker address in Settings first (it starts with https://).');
+  const headers = { ...(opts.headers || {}), 'X-App-Key': S.settings.appKey };
+  if (opts.body) headers['Content-Type'] = 'application/json';
+  const res = await fetch(base + path, { ...opts, headers });
+  let body = null;
+  try { body = await res.json(); } catch { /* non-JSON */ }
+  if (!res.ok) throw new Error((body && body.error) || `Server returned ${res.status}`);
+  return body;
+}
+const connected = () => !!(S.settings.appKey && baseUrl()) && !S.demo;
+const post = (path, b) => api(path, { method: 'POST', body: JSON.stringify(b) });
+
+async function loadList(quiet) {
+  if (!connected()) return;
+  loading = true; if (!quiet) render();
+  try {
+    const out = await post('/api/restaurants/list', {});
+    S.restaurants = out.restaurants; S.at = Date.now(); S.status.list = { at: S.at, ok: true, message: '' };
+  } catch (e) { S.status.list = { at: Date.now(), ok: false, message: e.message }; }
+  loading = false; save(); render();
+}
+
+const find = id => S.restaurants.find(r => r.id === id);
+// Changes show at once and are written to Notion in the background; if Notion refuses, you are told and the change stays on this phone only.
+async function upd(id, fields) {
+  const r = find(id); if (!r) return;
+  Object.assign(r, fields); save();
+  if (!connected()) return;
+  try { const out = await post('/api/restaurants/update', { id, fields }); Object.assign(r, out.restaurant); save(); }
+  catch (e) { toast('Not saved to Notion: ' + e.message); }
+}
+
+/* ---------- list ---------- */
+const readyOf = r => !!(r.bookingLink || r.website || r.phone || r.whatsapp);
+const cardBadge = r => r.card === 'No' ? '<span class="badge ok">No card</span>'
+  : r.card === 'Yes - guarantee' ? '<span class="badge warn">💳 Card holds table</span>'
+  : r.card === 'Yes - deposit' ? '<span class="badge warn">💳 Deposit</span>' : '<span class="badge">Card: ?</span>';
+const methodBadge = r => r.method && r.method !== 'Unknown' ? `<span class="badge acc">${esc(r.method)}</span>` : '<span class="badge">Method: ?</span>';
+
+function visible() {
+  const t = q.trim().toLowerCase();
+  return S.restaurants
+    .filter(r => (city === 'All' || r.city === city) && (!favOnly || r.favourite) && (!readyOnly || readyOf(r)) && (!t || [r.name, r.area, r.cuisine, r.city].join(' ').toLowerCase().includes(t)))
+    .sort((a, b) => (b.favourite - a.favourite) || a.name.localeCompare(b.name));
+}
+function cardHtml(r) {
+  const sub = [r.area, r.cuisine, r.city === 'Costa Brava' || r.city === 'Vienna' || city !== 'All' ? '' : r.city].filter(Boolean).join(' · ');
+  return `<div class="rc" role="button" tabindex="0" data-act="open" data-id="${esc(r.id)}"><div class="top"><div class="nm"><b>${esc(r.name)}</b><span>${esc(sub || r.city)}</span></div>
+    <button class="star ${r.favourite ? 'on' : ''}" data-act="star" data-id="${esc(r.id)}" aria-label="Favourite">★</button></div>
+    <div class="badges">${methodBadge(r)}${cardBadge(r)}${r.visits ? `<span class="badge">${r.visits} visit${r.visits > 1 ? 's' : ''}</span>` : ''}</div></div>`;
+}
+function renderList() {
+  const items = visible(), el = $('list'); if (!el) return;
+  el.innerHTML = items.length ? items.map(cardHtml).join('')
+    : `<p class="empty">${S.restaurants.length ? 'No restaurant matches these filters.' : connected() ? (loading ? 'Loading your restaurants…' : 'Nothing here yet. Pull the list from Notion with ⟳ or add a place with +.') : 'Open Settings to connect, or load the demo to try Mesa.'}</p>`;
+}
+
+function placesHtml() {
+  const count = c => S.restaurants.filter(r => c === 'All' || r.city === c).length;
+  const st = S.status.list;
+  const pill = S.demo ? '<span class="pill">Demo</span>' : !connected() ? '<span class="pill bad">Not connected</span>'
+    : loading ? '<span class="pill">Loading…</span>' : st && !st.ok ? '<span class="pill bad" data-act="reload">Offline copy ⟳</span>' : `<button class="pill" data-act="reload">⟳ ${S.at ? new Date(S.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Load'}</button>`;
+  return `<div class="hd"><h1>Mesa</h1>${pill}</div>
+    ${st && !st.ok && connected() ? `<div class="errbox" style="margin:0 0 8px">${esc(st.message)}</div>` : ''}
+    <div class="scroll">${['All', ...CITIES].map(c => `<button class="chip ${city === c ? 'on' : ''}" data-act="city" data-v="${c}">${c}<small>${count(c)}</small></button>`).join('')}</div>
+    <input class="search" id="q" type="search" placeholder="Search name, area or cuisine" value="${esc(q)}" autocomplete="off">
+    <div class="chips" style="margin-bottom:10px">
+      <button class="chip ${favOnly ? 'on' : ''}" data-act="fav">★ Favourites</button>
+      <button class="chip ${readyOnly ? 'on' : ''}" data-act="ready">Ready to book</button></div>
+    <div id="list"></div>`;
+}
+
+/* ---------- bookings tab ---------- */
+const upcoming = () => S.bookings.filter(b => b.status === 'booked' && b.date >= today()).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+function bookingsHtml() {
+  const up = upcoming();
+  const ask = S.bookings.filter(b => b.status === 'booked' && b.date < today()).sort((a, b) => b.date.localeCompare(a.date));
+  const hist = S.bookings.filter(b => b.status === 'went').sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10);
+  const row = (b, btns) => `<div class="bk"><div><b>${esc(b.name)}</b><div class="when">${esc(dateLabel(b.date))} · ${esc(b.time)} · ${b.party} ${b.party > 1 ? 'people' : 'person'}</div></div><div class="chips">${btns}</div></div>`;
+  return `<div class="hd"><h1>Bookings</h1></div><div class="stack">
+    ${ask.length ? `<div class="card"><h3>Did you go?</h3>${ask.map(b => row(b, `<button class="chip" data-act="went" data-id="${b.id}">Yes ✓</button><button class="chip" data-act="cancel" data-id="${b.id}">No</button>`)).join('')}</div>` : ''}
+    <div class="card"><h3>Upcoming</h3>${up.length ? up.map(b => row(b, `<button class="chip" data-act="open" data-id="${esc(b.rid)}">Details</button><button class="chip" data-act="cancel" data-id="${b.id}">Cancel</button>`)).join('') : '<p class="empty">No bookings yet. Open a restaurant and tap “Book a table”.</p>'}</div>
+    ${hist.length ? `<div class="card"><h3>Been there</h3>${hist.map(b => row(b, '')).join('')}</div>` : ''}
+    <p class="mu">Bookings are kept on this phone. “I booked it” also puts the table in your Google Calendar. Cancelling here does not delete the calendar event.</p></div>`;
+}
+
+/* ---------- restaurant sheet ---------- */
+function openSheet(html) {
+  $('overlay').innerHTML = `<div class="scrim" id="scrim"><div class="sheet" role="dialog">${html}</div></div>`;
+  $('scrim').onclick = e => { if (e.target.id === 'scrim') closeSheet(); };
+}
+function closeSheet() { $('overlay').innerHTML = ''; }
+
+function cardNote(r) {
+  if (r.card === 'No') return '<div class="note ok">No card needed here, as far as you have found.</div>';
+  if (r.card === 'Unknown') return '<div class="note">Card requirement not known yet. Mesa will ask after you book, so it is on record for next time.</div>';
+  return `<div class="note warn">💳 ${r.card === 'Yes - deposit' ? 'They take a deposit' : 'They hold the table with a card'}${r.policy ? `: ${esc(r.policy)}` : '.'}<br>Have a one-time Revolut card ready. Mesa never stores card numbers; you type them only on the restaurant’s own page.</div>`;
+}
+function openRestaurant(id) {
+  const r = find(id); if (!r) return;
+  const link = safeUrl(r.bookingLink), web = safeUrl(r.website);
+  openSheet(`<div class="hd" style="margin:0 0 4px"><div><h2>${esc(r.name)}</h2><div class="mu">${esc([r.area, r.cuisine, r.city, r.price].filter(Boolean).join(' · '))}</div></div>
+      <button class="star ${r.favourite ? 'on' : ''}" data-act="star" data-id="${esc(id)}" data-sheet="1" aria-label="Favourite">★</button></div>
+    <div class="badges">${methodBadge(r)}${cardBadge(r)}${r.meals.map(m => `<span class="badge">${esc(m)}</span>`).join('')}</div>
+    ${cardNote(r)}
+    ${r.notes ? `<div class="note">${esc(r.notes)}</div>` : ''}
+    ${r.lastVisit ? `<p class="mu">Last visit ${esc(dateLabel(r.lastVisit))}${r.visits ? ` · ${r.visits} visit${r.visits > 1 ? 's' : ''}` : ''}</p>` : ''}
+    <div class="actions">
+      <button class="btn go wide" data-act="book" data-id="${esc(id)}">Book a table</button>
+      ${web ? `<a class="btn" href="${esc(web)}" target="_blank" rel="noopener">Website</a>` : ''}
+      ${r.phone ? `<a class="btn" href="tel:${esc(telDigits(r.phone))}">Call</a>` : ''}
+      ${r.whatsapp ? `<a class="btn" href="https://wa.me/${esc(waDigits(r.whatsapp))}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
+      ${link && link !== web ? `<a class="btn" href="${esc(link)}" target="_blank" rel="noopener">Booking page</a>` : ''}
+      <button class="btn" data-act="edit" data-id="${esc(id)}">Edit details</button>
+      <button class="btn" data-act="close">Close</button></div>`);
+}
+
+/* ---------- booking flow ---------- */
+function bookText(r, d) {
+  const name = S.settings.name || 'Matthias', lang = r.city === 'Vienna' ? 'de' : 'es';
+  const day = parseYmd(d.date).toLocaleDateString(lang === 'de' ? 'de-AT' : 'es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+  const note = d.note ? ` ${d.note.replace(/[.!?\s]*$/, '')}.` : '';
+  return lang === 'de'
+    ? `Guten Tag, ich würde gerne einen Tisch für ${d.party} Person${d.party > 1 ? 'en' : ''} am ${day} um ${d.time} Uhr reservieren, auf den Namen ${name}.${note} Haben Sie Platz? Brauchen Sie zur Bestätigung eine Kreditkarte oder eine Anzahlung? Danke!`
+    : `Hola, me gustaría reservar una mesa para ${d.party} el ${day} a las ${d.time}, a nombre de ${name}.${note} ¿Tenéis disponibilidad? Si hace falta tarjeta o depósito para confirmar, ¿me podéis decir cómo? Gracias.`;
+}
+function readBook() {
+  return { date: $('bkDate').value, time: $('bkTime').value, party: Math.max(1, Math.min(20, parseInt($('bkParty').dataset.v, 10) || 2)), note: $('bkNote').value.trim().slice(0, 200) };
+}
+function updateMsg(id) { const r = find(id), d = readBook(); if (r && d.date && d.time) $('bkMsg').textContent = bookText(r, d); }
+
+function openBook(id, keep) {
+  const r = find(id); if (!r) return;
+  const d = keep || { date: nextSaturday(), time: r.city === 'Vienna' ? '19:00' : '20:30', party: 2, note: '' };
+  const link = safeUrl(r.bookingLink) || safeUrl(r.website);
+  openSheet(`<button class="back" data-act="open" data-id="${esc(id)}">‹ ${esc(r.name)}</button><h2>Book ${esc(r.name)}</h2>
+    ${cardNote(r)}
+    <label class="lbl" for="bkDate">Date</label><input class="field" id="bkDate" type="date" value="${esc(d.date)}" min="${today()}">
+    <label class="lbl" for="bkTime">Time</label><input class="field" id="bkTime" type="time" value="${esc(d.time)}">
+    <span class="lbl">People</span><div class="step"><button data-act="party" data-v="-1" aria-label="Fewer">−</button><b id="bkParty" data-v="${d.party}">${d.party}</b><button data-act="party" data-v="1" aria-label="More">+</button></div>
+    <label class="lbl" for="bkNote">Note for the restaurant (optional)</label><input class="field" id="bkNote" maxlength="200" placeholder="Allergies, birthday, high chair…" value="${esc(d.note)}">
+    <span class="lbl">Message to send</span><div class="msg" id="bkMsg"></div>
+    <div class="actions">
+      ${link ? `<button class="btn go wide" data-act="openpage" data-id="${esc(id)}">Open booking page ↗</button>` : `<div class="note wide">No booking page saved yet. Use WhatsApp or call, or add the link under “Edit details”.</div>`}
+      ${r.whatsapp ? `<button class="btn" data-act="wa" data-id="${esc(id)}">WhatsApp</button>` : ''}
+      ${r.phone ? `<a class="btn" href="tel:${esc(telDigits(r.phone))}">Call</a>` : ''}
+      <button class="btn" data-act="copymsg">Copy message</button>
+      <button class="btn wide" data-act="booked" data-id="${esc(id)}">✓ I booked it</button></div>
+    <p class="mu">Book on the restaurant’s own page or by message. Then tap “I booked it” to save it to your calendar.</p>`);
+  updateMsg(id);
+  for (const el of ['bkDate', 'bkTime', 'bkNote']) $(el).addEventListener('input', () => updateMsg(id));
+}
+
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); toast('Copied'); }
+  catch {
+    const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); toast('Copied'); } catch { toast('Could not copy.'); }
+    ta.remove();
+  }
+}
+
+async function confirmBooked(id) {
+  const r = find(id), d = readBook();
+  if (!r) return;
+  if (!d.date || !d.time) { toast('Pick a date and time first.'); return; }
+  const b = { id: 'b' + Date.now().toString(36), rid: id, name: r.name, city: r.city, date: d.date, time: d.time, party: d.party, note: d.note, status: 'booked', cal: false };
+  S.bookings.push(b); save(); closeSheet(); render();
+  if (connected()) {
+    try {
+      const start = new Date(`${d.date}T${d.time}`), end = new Date(+start + 2 * 3600e3);
+      await post('/api/calendar/add', {
+        title: `🍽 ${r.name}`, start: start.toISOString(), end: end.toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        location: [r.name, r.area, r.city].filter(Boolean).join(', '),
+        description: [`Table for ${d.party}.`, d.note, r.bookingLink || r.website].filter(Boolean).join('\n'),
+      });
+      b.cal = true; save();
+    } catch (e) { toast('Saved here, but the calendar did not take it: ' + e.message); }
+  }
+  if (r.card === 'Unknown') askCard(id); else if (b.cal) toast('Booked ✓ and in your calendar');
+}
+function askCard(id) {
+  const r = find(id); if (!r) return;
+  openSheet(`<h2>Booked ✓</h2><p class="muted">Did ${esc(r.name)} ask for a card? Your answer is saved to Notion so you know next time.</p>
+    <div class="actions">
+      <button class="btn" data-act="card" data-id="${esc(id)}" data-v="No">No card</button>
+      <button class="btn" data-act="card" data-id="${esc(id)}" data-v="Yes - guarantee">Card holds the table</button>
+      <button class="btn" data-act="card" data-id="${esc(id)}" data-v="Yes - deposit">Deposit / prepayment</button>
+      <button class="btn" data-act="close">Did not get that far</button></div>`);
+}
+
+/* ---------- edit / add ---------- */
+const FIELDS = ['name', 'city', 'area', 'cuisine', 'price', 'method', 'bookingLink', 'platformId', 'website', 'phone', 'whatsapp', 'card', 'policy', 'notes'];
+function sel(idn, opts, cur) { return `<select class="field" id="${idn}">${opts.map(o => { const [v, l] = Array.isArray(o) ? o : [o, o || '—']; return `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`; }).join('')}</select>`; }
+function txt(idn, label, cur, ph = '', type = 'text') { return `<label class="lbl" for="${idn}">${label}</label><input class="field" id="${idn}" type="${type}" value="${esc(cur)}" placeholder="${esc(ph)}" autocomplete="off" autocapitalize="off">`; }
+function openEdit(id) {
+  const r = id ? find(id) : { name: '', city: city !== 'All' ? city : 'Madrid', area: '', cuisine: '', meals: [], price: '', method: 'Unknown', bookingLink: '', platformId: '', website: '', phone: '', whatsapp: '', card: 'Unknown', policy: '', notes: '' };
+  if (!r) return;
+  openSheet(`<h2>${id ? 'Edit details' : 'Add a restaurant'}</h2>
+    <label class="lbl" for="e_name">Name</label><input class="field" id="e_name" value="${esc(r.name)}" autocomplete="off">
+    <span class="lbl">City</span>${sel('e_city', CITIES, r.city)}
+    ${txt('e_area', 'Area', r.area, 'Llafranc')}${txt('e_cuisine', 'Cuisine', r.cuisine, 'Japanese')}
+    <span class="lbl">Meals</span><div class="checks">${MEALS.map(m => `<label><input type="checkbox" name="e_meal" value="${m}" ${r.meals.includes(m) ? 'checked' : ''}> ${m}</label>`).join('')}</div>
+    <span class="lbl">Price</span>${sel('e_price', PRICES, r.price)}
+    <span class="lbl">How you book</span>${sel('e_method', METHODS, r.method)}
+    ${txt('e_bookingLink', 'Booking page link', r.bookingLink, 'https://…', 'url')}${txt('e_website', 'Website', r.website, 'https://…', 'url')}
+    ${txt('e_phone', 'Phone', r.phone, '+34 …', 'tel')}${txt('e_whatsapp', 'WhatsApp number (if they take bookings there)', r.whatsapp, '+34 …', 'tel')}
+    ${txt('e_platformId', 'Booking platform id (optional)', r.platformId)}
+    <span class="lbl">Card needed</span>${sel('e_card', CARDS, r.card)}
+    ${txt('e_policy', 'Deposit or cancellation policy', r.policy, 'e.g. 20 € per person, cancel 24 h before')}
+    <label class="lbl" for="e_notes">Notes</label><textarea class="field" id="e_notes">${esc(r.notes)}</textarea>
+    <div class="actions"><button class="btn go" data-act="saveedit" data-id="${id ? esc(id) : ''}">Save</button><button class="btn" data-act="${id ? 'open' : 'close'}" data-id="${id ? esc(id) : ''}">Cancel</button></div>`);
+}
+async function saveEdit(id) {
+  const g = k => $('e_' + k).value.trim();
+  const next = {}; for (const k of FIELDS) next[k] = g(k);
+  next.meals = [...document.querySelectorAll('input[name=e_meal]:checked')].map(x => x.value);
+  if (!next.name) { toast('Give it a name.'); return; }
+  if (id) {
+    const r = find(id), diff = {};
+    for (const k of [...FIELDS, 'meals']) if (JSON.stringify(next[k]) !== JSON.stringify(r[k] ?? (k === 'meals' ? [] : ''))) diff[k] = next[k];
+    if (!Object.keys(diff).length) { openRestaurant(id); return; }
+    await upd(id, diff); openRestaurant(id); render();
+    return;
+  }
+  if (connected()) {
+    try { const out = await post('/api/restaurants/add', next); S.restaurants.push(out.restaurant); save(); closeSheet(); render(); toast('Added to Notion ✓'); }
+    catch (e) { toast('Could not add: ' + e.message); }
+  } else {
+    S.restaurants.push({ id: 'local' + Date.now().toString(36), url: '', favourite: false, lastVisit: null, visits: 0, ...next }); save(); closeSheet(); render();
+  }
+}
+
+/* ---------- settings ---------- */
+function settingsHtml() {
+  const st = S.status, fmtAt = a => new Date(a).toLocaleString();
+  return `<div class="hd"><h1>Settings</h1></div><div class="stack">
+    <div class="card"><h3>Connection</h3>
+      <p class="muted" style="margin-top:0">Mesa uses the same Worker as Calorie tracker and My Day, so the address and key are the same.</p>
+      <label class="lbl" for="baseUrl">Worker address</label><input class="field" id="baseUrl" inputmode="url" autocapitalize="off" value="${esc(S.settings.baseUrl)}" placeholder="https://calorie-tracker.yourname.workers.dev">
+      <label class="lbl" for="appKey">App key</label><input class="field" id="appKey" type="password" autocomplete="off" value="${esc(S.settings.appKey)}" placeholder="paste your app key">
+      <div class="actions"><button class="btn go" data-act="saveconn">Save</button><button class="btn" data-act="check">Check connection</button><button class="btn wide" data-act="reload">Reload restaurants from Notion</button></div>
+      <div id="checkOut"></div>
+      ${st.list ? `<div class="${st.list.ok ? 'okbox' : 'errbox'}"><b>Restaurants</b> ${fmtAt(st.list.at)}: ${st.list.ok ? 'OK' : esc(st.list.message)}</div>` : ''}</div>
+    <div class="card"><h3>Your booking details</h3>
+      <p class="muted" style="margin-top:0">Used in the message you send to a restaurant. Stays on this phone.</p>
+      <label class="lbl" for="myName">Name for reservations</label><input class="field" id="myName" value="${esc(S.settings.name)}" placeholder="Matthias" autocomplete="off">
+      <div class="actions"><button class="btn" data-act="savename">Save name</button></div></div>
+    <div class="card"><h3>Display</h3>
+      <div class="seg">${[['dark', 'Dark'], ['light', 'Light'], ['auto', 'Match phone']].map(([k, l]) => `<button data-act="theme" data-v="${k}" class="${S.settings.theme === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+    <div class="card"><h3>Cards and payments</h3>
+      <p class="muted" style="margin-top:0">Mesa never asks for or stores card numbers. When a restaurant wants a card, you type it on their own booking page, ideally a one-time Revolut card. Mesa only records <i>whether</i> a card was needed.</p></div>
+    <div class="card"><h3>Demo</h3>
+      <div class="actions">${S.demo ? '<button class="btn wide" data-act="demo-off">Remove demo data</button>' : '<button class="btn wide" data-act="demo-on">Load demo data</button>'}</div></div>
+    <p class="mu" style="text-align:center">Mesa · build 2026-11-03.1</p></div>`;
+}
+async function checkConn() {
+  const out = $('checkOut'); out.innerHTML = '<div class="okbox">Checking…</div>';
+  try {
+    const s = await api('/api/status');
+    const line = (ok, t) => `<div>${ok ? '✅' : '❌'} ${t}</div>`;
+    out.innerHTML = `<div class="${s.notion && s.restaurantsDb ? 'okbox' : 'errbox'}">${line(s.notion, 'Notion token')}${line(s.restaurantsDb, 'Restaurant database set on the Worker')}${line(s.calendarConnected, 'Google Calendar (for “I booked it”)')}</div>`;
+  } catch (e) { out.innerHTML = `<div class="errbox">${esc(e.message)}</div>`; }
+}
+
+const DEMO = [
+  ['Far Nomo', 'Costa Brava', 'Llafranc', 'Japanese', 'CoverManager', 'https://example.com/far-nomo', '', '+34972300000', '', 'Unknown', true],
+  ['Filandón', 'Madrid', '', 'Spanish', 'Own website', 'https://example.com/filandon', '', '+34910000001', '+34600000001', 'No', true],
+  ['Plachutta Walfischgasse', 'Vienna', '', 'Austrian', 'Molzait', 'https://example.com/plachutta', '', '+4315121000', '', 'Yes - guarantee', false],
+  ['Haramboure', 'Madrid', 'Maldonado', 'Basque', 'Unknown', '', '', '', '', 'Unknown', false],
+  ['Carbo', 'Costa Brava', 'Begur', '', 'Unknown', '', '', '', '', 'Unknown', false],
+].map(([name, city, area, cuisine, method, bookingLink, website, phone, whatsapp, card, favourite], i) => ({
+  id: 'demo' + i, url: '', name, city, area, cuisine, meals: [], price: '', favourite, method, bookingLink, platformId: '', website, phone, whatsapp, card,
+  policy: card === 'Yes - guarantee' ? 'Card to hold the table, 24 h cancellation' : '', notes: '', lastVisit: null, visits: 0,
+}));
+
+/* ---------- render ---------- */
+function render() {
+  applyTheme();
+  const app = $('app');
+  app.innerHTML = view === 'places' ? placesHtml() : view === 'bookings' ? bookingsHtml() : settingsHtml();
+  if (view === 'places') {
+    renderList();
+    const input = $('q');
+    input.oninput = () => { q = input.value; renderList(); };
+  }
+  $('fabHost').innerHTML = view === 'places' ? '<button class="fab" data-act="add" aria-label="Add restaurant">+</button>' : '';
+  const n = upcoming().length;
+  $('nav').innerHTML = [['places', '🍴', 'Places'], ['bookings', '📅', 'Bookings'], ['settings', '⚙️', 'Settings']]
+    .map(([k, i, l]) => `<button class="${view === k ? 'on' : ''}" data-act="tab" data-v="${k}"><i>${i}</i>${l}${k === 'bookings' && n ? `<span class="nb">${n}</span>` : ''}</button>`).join('');
+}
+
+let toastTimer;
+function toast(msg, label, fn) {
+  clearTimeout(toastTimer);
+  $('toast').innerHTML = `<div><span>${esc(msg)}</span>${label ? '<button id="toastBtn">' + esc(label) + '</button>' : ''}</div>`;
+  if (label) $('toastBtn').onclick = () => { fn(); $('toast').innerHTML = ''; };
+  toastTimer = setTimeout(() => { $('toast').innerHTML = ''; }, label ? 9000 : 3500);
+}
+
+/* ---------- events ---------- */
+const ACT = {
+  tab: el => { view = el.dataset.v; closeSheet(); render(); window.scrollTo(0, 0); },
+  city: el => { city = el.dataset.v; render(); },
+  fav: () => { favOnly = !favOnly; render(); },
+  ready: () => { readyOnly = !readyOnly; render(); },
+  reload: () => loadList(),
+  open: el => openRestaurant(el.dataset.id),
+  close: () => closeSheet(),
+  star: el => {
+    const r = find(el.dataset.id); if (!r) return;
+    upd(r.id, { favourite: !r.favourite }); render();
+    if (el.dataset.sheet) openRestaurant(r.id);
+  },
+  book: el => openBook(el.dataset.id),
+  party: el => { const p = $('bkParty'), v = Math.max(1, Math.min(20, (parseInt(p.dataset.v, 10) || 2) + Number(el.dataset.v))); p.dataset.v = v; p.textContent = v; const f = $('bkMsg'); if (f) { const id = document.querySelector('[data-act=booked]')?.dataset.id; updateMsg(id); } },
+  openpage: el => { const r = find(el.dataset.id); const u = safeUrl(r.bookingLink) || safeUrl(r.website); if (u) window.open(u, '_blank', 'noopener'); },
+  wa: el => { const r = find(el.dataset.id); window.open(`https://wa.me/${waDigits(r.whatsapp)}?text=${encodeURIComponent(bookText(r, readBook()))}`, '_blank', 'noopener'); },
+  copymsg: () => copyText($('bkMsg').textContent),
+  booked: el => confirmBooked(el.dataset.id),
+  card: el => {
+    const r = find(el.dataset.id), v = el.dataset.v; closeSheet();
+    upd(r.id, { card: v }); toast(v === 'No' ? 'Noted: no card needed' : 'Noted: card needed. Add the details under Edit if you like.');
+    render();
+  },
+  edit: el => openEdit(el.dataset.id),
+  add: () => openEdit(''),
+  saveedit: el => saveEdit(el.dataset.id),
+  went: el => {
+    const b = S.bookings.find(x => x.id === el.dataset.id), r = b && find(b.rid); if (!b) return;
+    b.status = 'went'; save();
+    if (r) upd(r.id, { visits: (r.visits || 0) + 1, lastVisit: b.date });
+    render(); toast('Nice. Saved as a visit.');
+  },
+  cancel: el => {
+    const b = S.bookings.find(x => x.id === el.dataset.id); if (!b) return;
+    const wasCal = b.cal && b.status === 'booked' && b.date >= today();
+    b.status = 'cancelled'; save(); render();
+    toast(wasCal ? 'Cancelled here. Delete the calendar event too, and tell the restaurant.' : 'Removed.', 'Undo', () => { b.status = 'booked'; save(); render(); });
+  },
+  saveconn: () => { S.settings.baseUrl = $('baseUrl').value.trim(); S.settings.appKey = $('appKey').value.trim(); save(); toast('Saved'); loadList(); },
+  check: async () => { S.settings.baseUrl = $('baseUrl').value.trim(); S.settings.appKey = $('appKey').value.trim(); save(); await checkConn(); },
+  savename: () => { S.settings.name = $('myName').value.trim().slice(0, 60); save(); toast('Saved'); },
+  theme: el => { S.settings.theme = el.dataset.v; save(); render(); },
+  'demo-on': () => { S.demo = true; S.restaurants = JSON.parse(JSON.stringify(DEMO)); save(); view = 'places'; render(); },
+  'demo-off': () => { S.demo = false; S.restaurants = []; S.bookings = S.bookings.filter(b => !b.rid.startsWith('demo')); save(); render(); loadList(); },
+};
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-act]'); if (!el) return;
+  e.preventDefault(); e.stopPropagation();
+  const fn = ACT[el.dataset.act]; if (fn) fn(el);
+});
+document.addEventListener('keydown', e => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.rc')) { e.preventDefault(); openRestaurant(e.target.dataset.id); }
+});
+document.addEventListener('visibilitychange', () => { if (!document.hidden && connected() && Date.now() - S.at > 5 * 60e3) loadList(true); });
+
+render();
+loadList(true);
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
