@@ -69,6 +69,15 @@ a { color: var(--acc); }
 .badge.ok { background: var(--good-soft); color: var(--good); }
 .badge.warn { background: var(--warn-soft); color: var(--warn); }
 .badge.acc { background: var(--acc); color: var(--onacc); font-weight: 600; }
+.rc.wish { border-style: dashed; }
+.badge.wish { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+details.more { margin-top: 12px; }
+details.more summary { cursor: pointer; color: var(--muted); font-size: 14px; padding: 8px 0; }
+.shr { display: flex; gap: 12px; align-items: center; padding: 9px 2px; border-top: 1px solid var(--line); }
+.shr input { width: 22px; height: 22px; flex: none; accent-color: var(--acc); }
+.shr b { font-weight: 600; overflow-wrap: anywhere; }
+.shr small { display: block; color: var(--muted); font-size: 12px; }
+.shgrp { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
 .empty { color: var(--muted); font-size: 14px; padding: 14px 2px; margin: 0; text-align: center; }
 
 .nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--card); border-top: 1px solid var(--line); display: flex; padding-bottom: env(safe-area-inset-bottom); }
@@ -146,7 +155,7 @@ const PRICES = ['', '€', '€€', '€€€', '€€€€'];
 const MEALS = ['Lunch', 'Dinner', 'Brunch'];
 
 /* ---------- state ---------- */
-function blank() { return { restaurants: [], at: 0, bookings: [], settings: { baseUrl: '', appKey: '', theme: 'dark', name: '', phone: '' }, status: {}, demo: false }; }
+function blank() { return { restaurants: [], at: 0, bookings: [], settings: { baseUrl: '', appKey: '', theme: 'dark', name: '', phone: '', share: { lang: 'en', web: true, map: true, phone: false, notes: false } }, status: {}, demo: false }; }
 function load() {
   try { const o = JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); const s = Object.assign(blank(), o); s.settings = Object.assign(blank().settings, o.settings); return s; }
   catch { return blank(); }
@@ -156,7 +165,8 @@ function save() {
   catch { toast('Could not save: browser storage is full or blocked.'); }
 }
 let S = load();
-let view = 'places', city = 'All', q = '', favOnly = false, readyOnly = false, loading = false;
+let view = 'places', city = 'All', q = '', favOnly = false, readyOnly = false, wishOnly = false, loading = false;
+const SHARE_DEFAULTS = { lang: 'en', web: true, map: true, phone: false, notes: false };
 
 function applyTheme() {
   const t = ['dark', 'light', 'auto'].includes(S.settings.theme) ? S.settings.theme : 'dark';
@@ -206,19 +216,21 @@ const readyOf = r => !!(r.bookingLink || r.website || r.phone || r.whatsapp);
 const cardBadge = r => r.card === 'No' ? '<span class="badge ok">No card</span>'
   : r.card === 'Yes - guarantee' ? '<span class="badge warn">💳 Card holds table</span>'
   : r.card === 'Yes - deposit' ? '<span class="badge warn">💳 Deposit</span>' : '<span class="badge">Card: ?</span>';
+const wishBadge = r => r.wishlist ? `<span class="badge wish">🔖 ${r.wishlist === 'Booked' ? 'Booked, not been yet' : 'Not been yet'}</span>` : '';
 const methodBadge = r => r.method && r.method !== 'Unknown' ? `<span class="badge acc">${esc(r.method)}</span>` : '<span class="badge">Method: ?</span>';
 
 function visible() {
   const t = q.trim().toLowerCase();
   return S.restaurants
-    .filter(r => (city === 'All' || r.city === city) && (!favOnly || r.favourite) && (!readyOnly || readyOf(r)) && (!t || [r.name, r.area, r.cuisine, r.city].join(' ').toLowerCase().includes(t)))
+    .filter(r => (city === 'All' || r.city === city) && (!favOnly || r.favourite) && (!wishOnly || r.wishlist) && (!readyOnly || readyOf(r)) && (!t || [r.name, r.area, r.cuisine, r.city].join(' ').toLowerCase().includes(t)))
     .sort((a, b) => (b.favourite - a.favourite) || a.name.localeCompare(b.name));
 }
 function cardHtml(r) {
   const sub = [r.area, r.cuisine, r.city === 'Costa Brava' || r.city === 'Vienna' || city !== 'All' ? '' : r.city].filter(Boolean).join(' · ');
-  return `<div class="rc" role="button" tabindex="0" data-act="open" data-id="${esc(r.id)}"><div class="top"><div class="nm"><b>${esc(r.name)}</b><span>${esc(sub || r.city)}</span></div>
-    <button class="star ${r.favourite ? 'on' : ''}" data-act="star" data-id="${esc(r.id)}" aria-label="Favourite">★</button></div>
-    <div class="badges">${methodBadge(r)}${cardBadge(r)}${r.visits ? `<span class="badge">${r.visits} visit${r.visits > 1 ? 's' : ''}</span>` : ''}</div></div>`;
+  return `<div class="rc ${r.wishlist ? 'wish' : ''}" role="button" tabindex="0" data-act="open" data-id="${esc(r.id)}"><div class="top"><div class="nm"><b>${esc(r.name)}</b><span>${esc(sub || r.city)}</span></div>
+    ${r.wishlist ? '' : `<button class="star ${r.favourite ? 'on' : ''}" data-act="star" data-id="${esc(r.id)}" aria-label="Favourite">★</button>`}</div>
+    ${r.wishlist && r.why ? `<span class="mu" style="display:block;margin-top:4px">${esc(r.why)}</span>` : ''}
+    <div class="badges">${wishBadge(r)}${methodBadge(r)}${cardBadge(r)}${r.visits ? `<span class="badge">${r.visits} visit${r.visits > 1 ? 's' : ''}</span>` : ''}</div></div>`;
 }
 function renderList() {
   const items = visible(), el = $('list'); if (!el) return;
@@ -231,12 +243,13 @@ function placesHtml() {
   const st = S.status.list;
   const pill = S.demo ? '<span class="pill">Demo</span>' : !connected() ? '<span class="pill bad">Not connected</span>'
     : loading ? '<span class="pill">Loading…</span>' : st && !st.ok ? '<span class="pill bad" data-act="reload">Offline copy ⟳</span>' : `<button class="pill" data-act="reload">⟳ ${S.at ? new Date(S.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Load'}</button>`;
-  return `<div class="hd"><h1>Mesa</h1>${pill}</div>
+  return `<div class="hd"><h1>Mesa</h1><div class="chips" style="flex-wrap:nowrap;align-items:center">${S.restaurants.length ? '<button class="pill" data-act="share">Share ↗</button>' : ''}${pill}</div></div>
     ${st && !st.ok && connected() ? `<div class="errbox" style="margin:0 0 8px">${esc(st.message)}</div>` : ''}
     <div class="scroll">${['All', ...CITIES].map(c => `<button class="chip ${city === c ? 'on' : ''}" data-act="city" data-v="${c}">${c}<small>${count(c)}</small></button>`).join('')}</div>
     <input class="search" id="q" type="search" placeholder="Search name, area or cuisine" value="${esc(q)}" autocomplete="off">
     <div class="chips" style="margin-bottom:10px">
       <button class="chip ${favOnly ? 'on' : ''}" data-act="fav">★ Favourites</button>
+      <button class="chip ${wishOnly ? 'on' : ''}" data-act="wish">🔖 To try<small>${S.restaurants.filter(r => r.wishlist).length}</small></button>
       <button class="chip ${readyOnly ? 'on' : ''}" data-act="ready">Ready to book</button></div>
     <div id="list"></div>`;
 }
@@ -271,18 +284,23 @@ function openRestaurant(id) {
   const r = find(id); if (!r) return;
   const link = safeUrl(r.bookingLink), web = safeUrl(r.website);
   openSheet(`<div class="hd" style="margin:0 0 4px"><div><h2>${esc(r.name)}</h2><div class="mu">${esc([r.area, r.cuisine, r.city, r.price].filter(Boolean).join(' · '))}</div></div>
-      <button class="star ${r.favourite ? 'on' : ''}" data-act="star" data-id="${esc(id)}" data-sheet="1" aria-label="Favourite">★</button></div>
-    <div class="badges">${methodBadge(r)}${cardBadge(r)}${r.meals.map(m => `<span class="badge">${esc(m)}</span>`).join('')}</div>
+      ${r.wishlist ? '' : `<button class="star ${r.favourite ? 'on' : ''}" data-act="star" data-id="${esc(id)}" data-sheet="1" aria-label="Favourite">★</button>`}</div>
+    <div class="badges">${wishBadge(r)}${methodBadge(r)}${cardBadge(r)}${(r.meals || []).map(m => `<span class="badge">${esc(m)}</span>`).join('')}</div>
+    ${r.wishlist ? `<div class="note warn">You have not been here yet${r.added ? ` · added ${esc(dateLabel(r.added))}` : ''}.${r.why ? `<br>${esc(r.why)}` : ''}</div>
+      <div class="seg">${['Want to try', 'Booked'].map(w => `<button class="${r.wishlist === w ? 'on' : ''}" data-act="wstatus" data-id="${esc(id)}" data-v="${w}">${w}</button>`).join('')}</div>` : ''}
     ${cardNote(r)}
     ${r.notes ? `<div class="note">${esc(r.notes)}</div>` : ''}
     ${r.lastVisit ? `<p class="mu">Last visit ${esc(dateLabel(r.lastVisit))}${r.visits ? ` · ${r.visits} visit${r.visits > 1 ? 's' : ''}` : ''}</p>` : ''}
     <div class="actions">
       <button class="btn go wide" data-act="book" data-id="${esc(id)}">Book a table</button>
+      ${r.wishlist ? `<button class="btn wide" data-act="been" data-id="${esc(id)}">✓ I’ve been here</button>` : ''}
       ${web ? `<a class="btn" href="${esc(web)}" target="_blank" rel="noopener">Website</a>` : ''}
       ${r.phone ? `<a class="btn" href="tel:${esc(telDigits(r.phone))}">Call</a>` : ''}
       ${r.whatsapp ? `<a class="btn" href="https://wa.me/${esc(waDigits(r.whatsapp))}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
       ${link && link !== web ? `<a class="btn" href="${esc(link)}" target="_blank" rel="noopener">Booking page</a>` : ''}
       <button class="btn" data-act="edit" data-id="${esc(id)}">Edit details</button>
+      <button class="btn" data-act="share" data-id="${esc(id)}">Recommend ↗</button>
+      ${r.wishlist ? `<button class="btn" data-act="remove" data-id="${esc(id)}">Remove from list</button>` : ''}
       <button class="btn" data-act="close">Close</button></div>`);
 }
 
@@ -348,6 +366,7 @@ async function confirmBooked(id) {
       b.cal = true; save();
     } catch (e) { toast('Saved here, but the calendar did not take it: ' + e.message); }
   }
+  if (r.wishlist === 'Want to try') upd(id, { wishlist: 'Booked' });
   if (r.card === 'Unknown') askCard(id); else if (b.cal) toast('Booked ✓ and in your calendar');
 }
 function askCard(id) {
@@ -361,26 +380,31 @@ function askCard(id) {
 }
 
 /* ---------- edit / add ---------- */
-const FIELDS = ['name', 'city', 'area', 'cuisine', 'price', 'method', 'bookingLink', 'platformId', 'website', 'phone', 'whatsapp', 'card', 'policy', 'notes'];
+const FIELDS = ['name', 'city', 'area', 'cuisine', 'price', 'method', 'bookingLink', 'platformId', 'website', 'phone', 'whatsapp', 'card', 'policy', 'notes', 'wishlist', 'why'];
 function sel(idn, opts, cur) { return `<select class="field" id="${idn}">${opts.map(o => { const [v, l] = Array.isArray(o) ? o : [o, o || '—']; return `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`; }).join('')}</select>`; }
 function txt(idn, label, cur, ph = '', type = 'text') { return `<label class="lbl" for="${idn}">${label}</label><input class="field" id="${idn}" type="${type}" value="${esc(cur)}" placeholder="${esc(ph)}" autocomplete="off" autocapitalize="off">`; }
 function openEdit(id) {
-  const r = id ? find(id) : { name: '', city: city !== 'All' ? city : 'Madrid', area: '', cuisine: '', meals: [], price: '', method: 'Unknown', bookingLink: '', platformId: '', website: '', phone: '', whatsapp: '', card: 'Unknown', policy: '', notes: '' };
+  const r = id ? find(id) : { name: '', city: city !== 'All' ? city : 'Madrid', area: '', cuisine: '', meals: [], price: '', method: 'Unknown', bookingLink: '', platformId: '', website: '', phone: '', whatsapp: '', card: 'Unknown', policy: '', notes: '', wishlist: wishOnly ? 'Want to try' : '', why: '' };
   if (!r) return;
   openSheet(`<h2>${id ? 'Edit details' : 'Add a restaurant'}</h2>
+    <span class="lbl">Have you been?</span>${sel('e_wishlist', [['', 'Yes, I have been'], ['Want to try', 'Not yet: want to try'], ['Booked', 'Not yet: booked']], r.wishlist || '')}
     <label class="lbl" for="e_name">Name</label><input class="field" id="e_name" value="${esc(r.name)}" autocomplete="off">
     <span class="lbl">City</span>${sel('e_city', CITIES, r.city)}
+    <label class="lbl" for="e_why">Why / who recommended it</label><input class="field" id="e_why" value="${esc(r.why || '')}" placeholder="e.g. Ana said the tasting menu is great" autocomplete="off" maxlength="500">
     ${txt('e_area', 'Area', r.area, 'Llafranc')}${txt('e_cuisine', 'Cuisine', r.cuisine, 'Japanese')}
-    <span class="lbl">Meals</span><div class="checks">${MEALS.map(m => `<label><input type="checkbox" name="e_meal" value="${m}" ${r.meals.includes(m) ? 'checked' : ''}> ${m}</label>`).join('')}</div>
+    ${txt('e_website', 'Website', r.website, 'https://…', 'url')}${txt('e_phone', 'Phone', r.phone, '+34 …', 'tel')}
+    <details class="more"><summary>Booking and other details</summary>
+    <span class="lbl">Meals</span><div class="checks">${MEALS.map(m => `<label><input type="checkbox" name="e_meal" value="${m}" ${(r.meals || []).includes(m) ? 'checked' : ''}> ${m}</label>`).join('')}</div>
     <span class="lbl">Price</span>${sel('e_price', PRICES, r.price)}
     <span class="lbl">How you book</span>${sel('e_method', METHODS, r.method)}
-    ${txt('e_bookingLink', 'Booking page link', r.bookingLink, 'https://…', 'url')}${txt('e_website', 'Website', r.website, 'https://…', 'url')}
-    ${txt('e_phone', 'Phone', r.phone, '+34 …', 'tel')}${txt('e_whatsapp', 'WhatsApp number (if they take bookings there)', r.whatsapp, '+34 …', 'tel')}
+    ${txt('e_bookingLink', 'Booking page link', r.bookingLink, 'https://…', 'url')}
+    ${txt('e_whatsapp', 'WhatsApp number (if they take bookings there)', r.whatsapp, '+34 …', 'tel')}
     ${txt('e_platformId', 'Booking platform id (optional)', r.platformId)}
     <span class="lbl">Card needed</span>${sel('e_card', CARDS, r.card)}
     ${txt('e_policy', 'Deposit or cancellation policy', r.policy, 'e.g. 20 € per person, cancel 24 h before')}
-    <label class="lbl" for="e_notes">Notes</label><textarea class="field" id="e_notes">${esc(r.notes)}</textarea>
+    <label class="lbl" for="e_notes">Notes</label><textarea class="field" id="e_notes">${esc(r.notes)}</textarea></details>
     <div class="actions"><button class="btn go" data-act="saveedit" data-id="${id ? esc(id) : ''}">Save</button><button class="btn" data-act="${id ? 'open' : 'close'}" data-id="${id ? esc(id) : ''}">Cancel</button></div>`);
+  if (!id) setTimeout(() => $('e_name') && $('e_name').focus(), 50);
 }
 async function saveEdit(id) {
   const g = k => $('e_' + k).value.trim();
@@ -394,12 +418,96 @@ async function saveEdit(id) {
     await upd(id, diff); openRestaurant(id); render();
     return;
   }
+  if (!next.wishlist) delete next.wishlist; // keeps normal adds working before the Wishlist column exists in Notion
+  if (!next.why) delete next.why;
   if (connected()) {
-    try { const out = await post('/api/restaurants/add', next); S.restaurants.push(out.restaurant); save(); closeSheet(); render(); toast('Added to Notion ✓'); }
+    try { const out = await post('/api/restaurants/add', next); S.restaurants.push(out.restaurant); save(); closeSheet(); render(); toast(next.wishlist ? 'Added to your wishlist ✓' : 'Added to Notion ✓'); }
     catch (e) { toast('Could not add: ' + e.message); }
   } else {
-    S.restaurants.push({ id: 'local' + Date.now().toString(36), url: '', favourite: false, lastVisit: null, visits: 0, ...next }); save(); closeSheet(); render();
+    S.restaurants.push({ id: 'local' + Date.now().toString(36), url: '', favourite: false, lastVisit: null, visits: 0, wishlist: '', why: '', added: today(), ...next }); save(); closeSheet(); render();
   }
+}
+
+/* ---------- share recommendations ---------- */
+const SHARE_TXT = {
+  en: { intro: 'My restaurant tips 🍽', wish: '🔖 Still on my list to try', cities: {} },
+  es: { intro: 'Mis recomendaciones de restaurantes 🍽', wish: '🔖 Todavía por probar', cities: { Vienna: 'Viena' } },
+  de: { intro: 'Meine Restaurant-Tipps 🍽', wish: '🔖 Steht noch auf meiner Liste', cities: { Vienna: 'Wien' } },
+};
+const LANGS = [['en', 'English'], ['es', 'Español'], ['de', 'Deutsch']];
+const mapsUrl = r => 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent([r.name, r.area, r.city].filter(Boolean).join(' '));
+let shareSel = new Set(), shareWish = false;
+
+function shareText() {
+  const o = S.settings.share, T = SHARE_TXT[o.lang] || SHARE_TXT.en, cname = c => T.cities[c] || c;
+  const picked = S.restaurants.filter(r => shareSel.has(r.id));
+  if (!picked.length) return '';
+  const line = (r, withCity) => {
+    const head = [withCity ? cname(r.city) : '', r.area, r.cuisine, r.price].filter(Boolean).join(', ');
+    const out = [`• ${r.name}${head ? ` (${head})` : ''}`];
+    const note = r.wishlist ? r.why : r.notes;
+    if (o.notes && note) out.push('  ' + note);
+    if (o.web && safeUrl(r.website)) out.push('  ' + r.website);
+    if (o.phone && r.phone) out.push('  📞 ' + r.phone);
+    if (o.map) out.push('  🗺 ' + mapsUrl(r));
+    return out.join('\n');
+  };
+  const been = picked.filter(r => !r.wishlist), tryList = picked.filter(r => r.wishlist), parts = [];
+  if (been.length) parts.push(SHARE_TXT[o.lang]?.intro || SHARE_TXT.en.intro);
+  const cities = [...CITIES, ...new Set(been.map(r => r.city).filter(c => !CITIES.includes(c)))];
+  for (const c of cities) {
+    const rs = been.filter(r => r.city === c).sort((a, b) => (b.favourite - a.favourite) || a.name.localeCompare(b.name));
+    if (rs.length) parts.push(`📍 ${cname(c)}\n` + rs.map(r => line(r, false)).join('\n'));
+  }
+  if (tryList.length) parts.push(T.wish + '\n' + tryList.sort((a, b) => a.name.localeCompare(b.name)).map(r => line(r, true)).join('\n'));
+  return parts.join('\n\n');
+}
+function defaultShare(only) {
+  if (only) return [only];
+  const filtered = !!(q.trim() || city !== 'All' || favOnly || readyOnly || wishOnly);
+  let base = visible();
+  if (!filtered) base = base.filter(r => r.favourite && !r.wishlist);
+  return base.map(r => r.id);
+}
+function shareRows() {
+  return S.restaurants.filter(r => shareWish || !r.wishlist)
+    .sort((a, b) => (CITIES.indexOf(a.city) - CITIES.indexOf(b.city)) || (b.favourite - a.favourite) || a.name.localeCompare(b.name));
+}
+function renderShareList() {
+  const el = $('shList'); if (!el) return;
+  let last = null, html = '';
+  for (const r of shareRows()) {
+    if (r.city !== last) { last = r.city; html += `<div class="shgrp"><span class="grouphd" style="margin:0">${esc(r.city || 'Other')}</span><button class="chip" data-act="shcity" data-v="${esc(r.city)}">All / none</button></div>`; }
+    html += `<label class="shr"><input type="checkbox" data-shid="${esc(r.id)}" ${shareSel.has(r.id) ? 'checked' : ''}><span><b>${esc(r.name)}</b><small>${esc([r.area, r.cuisine].filter(Boolean).join(' · '))}${r.favourite ? ' · ★' : ''}${r.wishlist ? ' · 🔖 not been yet' : ''}</small></span></label>`;
+  }
+  el.innerHTML = html || '<p class="empty">Nothing to share yet.</p>';
+}
+function updateShare() {
+  const m = $('shMsg'); if (!m) return;
+  const t = shareText();
+  m.textContent = t || 'Tick the places you want to recommend.';
+  const n = shareSel.size;
+  for (const b of document.querySelectorAll('[data-needs-pick]')) b.disabled = !n;
+  $('shCount').textContent = n ? `${n} selected` : 'None selected';
+}
+function openShare(only) {
+  shareSel = new Set(defaultShare(only));
+  shareWish = [...shareSel].some(id => find(id)?.wishlist);
+  const o = S.settings.share;
+  openSheet(`<h2>Share recommendations</h2><p class="mu">Tick the places, check the message, and send it to a friend. <span id="shCount"></span></p>
+    <div class="chips"><button class="chip" data-act="shpreset" data-v="fav">★ Favourites</button><button class="chip" data-act="shpreset" data-v="all">Everywhere I’ve been</button><button class="chip" data-act="shpreset" data-v="none">Clear</button></div>
+    <label class="shr" style="border:0"><input type="checkbox" data-shwish ${shareWish ? 'checked' : ''}><span>Also list places I haven’t been to yet</span></label>
+    <div id="shList"></div>
+    <span class="lbl">Message language</span><div class="seg">${LANGS.map(([k, l]) => `<button data-act="shlang" data-v="${k}" class="${o.lang === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+    <span class="lbl">Include</span><div class="checks" style="flex-wrap:wrap">${[['web', 'Website'], ['map', 'Map link'], ['phone', 'Phone'], ['notes', 'My notes']].map(([k, l]) => `<label><input type="checkbox" data-shopt="${k}" ${o[k] ? 'checked' : ''}> ${l}</label>`).join('')}</div>
+    <span class="lbl">Message</span><div class="msg" id="shMsg"></div>
+    <div class="actions"><button class="btn go wide" data-act="shsend" data-needs-pick>Share…</button><button class="btn" data-act="shwa" data-needs-pick>WhatsApp</button><button class="btn" data-act="shcopy" data-needs-pick>Copy</button><button class="btn wide" data-act="close">Close</button></div>`);
+  renderShareList(); updateShare();
+}
+async function shareSend() {
+  const text = shareText(); if (!text) { toast('Tick at least one place.'); return; }
+  if (navigator.share) { try { await navigator.share({ text }); } catch (e) { if (e.name !== 'AbortError') copyText(text); } }
+  else copyText(text);
 }
 
 /* ---------- settings ---------- */
@@ -423,7 +531,7 @@ function settingsHtml() {
       <p class="muted" style="margin-top:0">Mesa never asks for or stores card numbers. When a restaurant wants a card, you type it on their own booking page, ideally a one-time Revolut card. Mesa only records <i>whether</i> a card was needed.</p></div>
     <div class="card"><h3>Demo</h3>
       <div class="actions">${S.demo ? '<button class="btn wide" data-act="demo-off">Remove demo data</button>' : '<button class="btn wide" data-act="demo-on">Load demo data</button>'}</div></div>
-    <p class="mu" style="text-align:center">Mesa · build 2026-11-03.1</p></div>`;
+    <p class="mu" style="text-align:center">Mesa · build 2026-11-04.1</p></div>`;
 }
 async function checkConn() {
   const out = $('checkOut'); out.innerHTML = '<div class="okbox">Checking…</div>';
@@ -442,8 +550,12 @@ const DEMO = [
   ['Carbo', 'Costa Brava', 'Begur', '', 'Unknown', '', '', '', '', 'Unknown', false],
 ].map(([name, city, area, cuisine, method, bookingLink, website, phone, whatsapp, card, favourite], i) => ({
   id: 'demo' + i, url: '', name, city, area, cuisine, meals: [], price: '', favourite, method, bookingLink, platformId: '', website, phone, whatsapp, card,
-  policy: card === 'Yes - guarantee' ? 'Card to hold the table, 24 h cancellation' : '', notes: '', lastVisit: null, visits: 0,
-}));
+  policy: card === 'Yes - guarantee' ? 'Card to hold the table, 24 h cancellation' : '', notes: '', lastVisit: null, visits: 0, wishlist: '', why: '', added: '',
+})).concat([
+  ['Gresca', 'Madrid', 'Chamberí', 'Spanish', 'Ana said the tasting menu is great', 'Want to try'],
+  ['Steirereck', 'Vienna', 'Stadtpark', 'Austrian', 'Recommended by Lena', 'Booked'],
+].map(([name, city, area, cuisine, why, wishlist], i) => ({ id: 'demow' + i, url: '', name, city, area, cuisine, meals: [], price: '', favourite: false, method: 'Unknown', bookingLink: '', platformId: '',
+  website: 'https://example.com/' + i, phone: '', whatsapp: '', card: 'Unknown', policy: '', notes: '', lastVisit: null, visits: 0, wishlist, why, added: '2026-11-04' })));
 
 /* ---------- render ---------- */
 function render() {
@@ -475,6 +587,38 @@ const ACT = {
   city: el => { city = el.dataset.v; render(); },
   fav: () => { favOnly = !favOnly; render(); },
   ready: () => { readyOnly = !readyOnly; render(); },
+  wish: () => { wishOnly = !wishOnly; render(); },
+  wstatus: el => { upd(el.dataset.id, { wishlist: el.dataset.v }); openRestaurant(el.dataset.id); render(); },
+  been: el => {
+    const id = el.dataset.id, r = find(id); if (!r) return;
+    upd(id, { wishlist: '', visits: Math.max(1, r.visits || 0), lastVisit: today() }); closeSheet(); render();
+    toast('Moved to your places. Make it a favourite?', '★ Favourite', () => { upd(id, { favourite: true }); render(); });
+  },
+  remove: async el => {
+    const id = el.dataset.id, r = find(id); if (!r) return;
+    const real = connected() && /^[0-9a-f-]{32,36}$/i.test(id);
+    S.restaurants = S.restaurants.filter(x => x.id !== id); save(); closeSheet(); render();
+    if (real) { try { await post('/api/restaurants/archive', { id }); } catch (e) { S.restaurants.push(r); save(); render(); toast('Not removed: ' + e.message); return; } }
+    toast('Removed from your list', 'Undo', async () => {
+      S.restaurants.push(r); save(); render();
+      if (real) { try { await post('/api/restaurants/archive', { id, archived: false }); } catch (e) { toast('Restored here, but Notion did not take it back: ' + e.message); } }
+    });
+  },
+  share: el => openShare(el.dataset.id),
+  shpreset: el => {
+    const v = el.dataset.v, base = S.restaurants.filter(r => !r.wishlist);
+    shareSel = new Set((v === 'fav' ? base.filter(r => r.favourite) : v === 'all' ? base : []).map(r => r.id));
+    renderShareList(); updateShare();
+  },
+  shcity: el => {
+    const ids = shareRows().filter(r => r.city === el.dataset.v).map(r => r.id), all = ids.every(i => shareSel.has(i));
+    for (const i of ids) all ? shareSel.delete(i) : shareSel.add(i);
+    renderShareList(); updateShare();
+  },
+  shlang: el => { S.settings.share.lang = el.dataset.v; save(); for (const b of el.parentNode.children) b.classList.toggle('on', b === el); updateShare(); },
+  shsend: () => shareSend(),
+  shwa: () => { const t = shareText(); if (t) window.open('https://wa.me/?text=' + encodeURIComponent(t), '_blank', 'noopener'); else toast('Tick at least one place.'); },
+  shcopy: () => { const t = shareText(); if (t) copyText(t); else toast('Tick at least one place.'); },
   reload: () => loadList(),
   open: el => openRestaurant(el.dataset.id),
   close: () => closeSheet(),
@@ -500,7 +644,7 @@ const ACT = {
   went: el => {
     const b = S.bookings.find(x => x.id === el.dataset.id), r = b && find(b.rid); if (!b) return;
     b.status = 'went'; save();
-    if (r) upd(r.id, { visits: (r.visits || 0) + 1, lastVisit: b.date });
+    if (r) upd(r.id, { visits: (r.visits || 0) + 1, lastVisit: b.date, ...(r.wishlist ? { wishlist: '' } : {}) });
     render(); toast('Nice. Saved as a visit.');
   },
   cancel: el => {
@@ -520,6 +664,12 @@ document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   e.preventDefault(); e.stopPropagation();
   const fn = ACT[el.dataset.act]; if (fn) fn(el);
+});
+document.addEventListener('change', e => {
+  const t = e.target, d = t.dataset || {};
+  if (d.shid) { t.checked ? shareSel.add(d.shid) : shareSel.delete(d.shid); updateShare(); }
+  else if ('shwish' in d) { shareWish = t.checked; if (!shareWish) for (const r of S.restaurants) if (r.wishlist) shareSel.delete(r.id); renderShareList(); updateShare(); }
+  else if (d.shopt) { S.settings.share[d.shopt] = t.checked; save(); updateShare(); }
 });
 document.addEventListener('keydown', e => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.rc')) { e.preventDefault(); openRestaurant(e.target.dataset.id); }

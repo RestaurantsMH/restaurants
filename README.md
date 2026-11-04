@@ -10,6 +10,11 @@ when you last went).
 - **Book a table:** pick date, time and party size. Mesa writes the message for you (Spanish for Madrid and the Costa Brava, German for Vienna),
   opens the restaurant's own booking page, WhatsApp or the phone.
 - **I booked it:** saves the table to your Google Calendar as "🍽 Name", then asks once whether a card was needed and stores the answer in Notion.
+- **Wishlist (🔖 To try):** places you have not been to yet live in the same Notion database, marked "Not been yet" (dashed card). Add one with +
+  (it starts as "Not yet" when the 🔖 filter is on), note why or who recommended it, and tap **I've been here** to turn it into a normal place
+  (visit count and date are set; star it if it is a favourite). **Remove from list** archives it in Notion, with Undo.
+- **Share ↗:** pick some places (or ★ favourites, or everywhere you've been), choose English, Spanish or German, and send a ready-made list with
+  website and map links through WhatsApp or the phone's share sheet. Places you have not been to are only included if you tick them.
 - **Bookings:** upcoming tables, and "Did you go?" afterwards, which updates last visit and visit count in Notion.
 
 ## What it does not do
@@ -19,7 +24,7 @@ When a restaurant wants a card, use a one-time Revolut card on the restaurant's 
 
 ## Setup
 
-1. **Notion:** open *Restaurant Favourites*, then ••• > Connections, and add the same integration My Day uses.
+1. **Notion:** *Restaurant Favourites* needs two columns, **Wishlist** (select: Want to try, Booked) and **Why / recommended by** (text); both were added on 2026-11-04. Open *Restaurant Favourites*, then ••• > Connections, and add the same integration My Day uses.
 2. **Worker:** from `Calorie tracker/worker`, run `npx wrangler deploy` (it already has `NOTION_RESTAURANTS_DB`).
    Add this app's address to `ALLOWED_ORIGIN` in `wrangler.toml` first (origin only, e.g. `https://mydayappmh.github.io`).
 3. **App:** publish this folder on GitHub Pages, open it on your phone, go to Settings, and enter the same Worker address and app key as My Day.
