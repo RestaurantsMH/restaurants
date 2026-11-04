@@ -68,6 +68,7 @@ a { color: var(--acc); }
 .badge { border-radius: 8px; padding: 2px 8px; font-size: 12px; background: var(--soft); color: var(--muted); }
 .badge.ok { background: var(--good-soft); color: var(--good); }
 .badge.warn { background: var(--warn-soft); color: var(--warn); }
+.badge.tag { background: none; border: 1px solid var(--line); }
 .badge.acc { background: var(--acc); color: var(--onacc); font-weight: 600; }
 .rc.wish { border-style: dashed; }
 .badge.wish { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
@@ -153,6 +154,7 @@ const METHODS = ['CoverManager', 'Molzait', 'TheFork', 'Own website', 'Phone', '
 const CARDS = [['Unknown', 'Not known yet'], ['No', 'No card needed'], ['Yes - guarantee', 'Card holds the table'], ['Yes - deposit', 'Deposit / prepayment']];
 const PRICES = ['', '€', '€€', '€€€', '€€€€'];
 const MEALS = ['Lunch', 'Dinner', 'Brunch'];
+const TAGS = ['Terrace', 'Sea view', 'Group-friendly', 'Kids welcome', 'Romantic', 'Special occasion', 'Casual', 'Fine dining', 'Vegetarian options', 'Dog-friendly', 'Quiet', 'Lively'];
 
 /* ---------- state ---------- */
 function blank() { return { restaurants: [], at: 0, bookings: [], settings: { baseUrl: '', appKey: '', theme: 'dark', name: '', phone: '', share: { lang: 'en', web: true, map: true, phone: false, notes: false } }, status: {}, demo: false }; }
@@ -165,7 +167,7 @@ function save() {
   catch { toast('Could not save: browser storage is full or blocked.'); }
 }
 let S = load();
-let view = 'places', city = 'All', q = '', favOnly = false, readyOnly = false, wishOnly = false, loading = false;
+let view = 'places', city = 'All', q = '', favOnly = false, readyOnly = false, wishOnly = false, tagFilter = '', loading = false;
 const SHARE_DEFAULTS = { lang: 'en', web: true, map: true, phone: false, notes: false };
 
 function applyTheme() {
@@ -222,7 +224,7 @@ const methodBadge = r => r.method && r.method !== 'Unknown' ? `<span class="badg
 function visible() {
   const t = q.trim().toLowerCase();
   return S.restaurants
-    .filter(r => (city === 'All' || r.city === city) && (!favOnly || r.favourite) && (!wishOnly || r.wishlist) && (!readyOnly || readyOf(r)) && (!t || [r.name, r.area, r.cuisine, r.city].join(' ').toLowerCase().includes(t)))
+    .filter(r => (city === 'All' || r.city === city) && (!favOnly || r.favourite) && (!wishOnly || r.wishlist) && (!readyOnly || readyOf(r)) && (!tagFilter || (r.tags || []).includes(tagFilter)) && (!t || [r.name, r.area, r.cuisine, r.city, ...(r.tags || [])].join(' ').toLowerCase().includes(t)))
     .sort((a, b) => (b.favourite - a.favourite) || a.name.localeCompare(b.name));
 }
 function cardHtml(r) {
@@ -230,7 +232,8 @@ function cardHtml(r) {
   return `<div class="rc ${r.wishlist ? 'wish' : ''}" role="button" tabindex="0" data-act="open" data-id="${esc(r.id)}"><div class="top"><div class="nm"><b>${esc(r.name)}</b><span>${esc(sub || r.city)}</span></div>
     ${r.wishlist ? '' : `<button class="star ${r.favourite ? 'on' : ''}" data-act="star" data-id="${esc(r.id)}" aria-label="Favourite">★</button>`}</div>
     ${r.wishlist && r.why ? `<span class="mu" style="display:block;margin-top:4px">${esc(r.why)}</span>` : ''}
-    <div class="badges">${wishBadge(r)}${methodBadge(r)}${cardBadge(r)}${r.visits ? `<span class="badge">${r.visits} visit${r.visits > 1 ? 's' : ''}</span>` : ''}</div></div>`;
+    <div class="badges">${wishBadge(r)}${methodBadge(r)}${cardBadge(r)}${r.visits ? `<span class="badge">${r.visits} visit${r.visits > 1 ? 's' : ''}</span>` : ''}</div>
+    ${(r.tags || []).length ? `<div class="badges" style="margin-top:6px">${r.tags.map(t => `<span class="badge tag">${esc(t)}</span>`).join('')}</div>` : ''}</div>`;
 }
 function renderList() {
   const items = visible(), el = $('list'); if (!el) return;
@@ -238,6 +241,8 @@ function renderList() {
     : `<p class="empty">${S.restaurants.length ? 'No restaurant matches these filters.' : connected() ? (loading ? 'Loading your restaurants…' : 'Nothing here yet. Pull the list from Notion with ⟳ or add a place with +.') : 'Open Settings to connect, or load the demo to try Mesa.'}</p>`;
 }
 
+// Only tags that at least one place has, so the filter row never shows an empty choice.
+const tagsInUse = () => TAGS.filter(t => S.restaurants.some(r => (r.tags || []).includes(t)));
 function placesHtml() {
   const count = c => S.restaurants.filter(r => c === 'All' || r.city === c).length;
   const st = S.status.list;
@@ -247,10 +252,11 @@ function placesHtml() {
     ${st && !st.ok && connected() ? `<div class="errbox" style="margin:0 0 8px">${esc(st.message)}</div>` : ''}
     <div class="scroll">${['All', ...CITIES].map(c => `<button class="chip ${city === c ? 'on' : ''}" data-act="city" data-v="${c}">${c}<small>${count(c)}</small></button>`).join('')}</div>
     <input class="search" id="q" type="search" placeholder="Search name, area or cuisine" value="${esc(q)}" autocomplete="off">
-    <div class="chips" style="margin-bottom:10px">
+    <div class="chips" style="margin-bottom:${tagsInUse().length ? '8px' : '10px'}">
       <button class="chip ${favOnly ? 'on' : ''}" data-act="fav">★ Favourites</button>
       <button class="chip ${wishOnly ? 'on' : ''}" data-act="wish">🔖 To try<small>${S.restaurants.filter(r => r.wishlist).length}</small></button>
       <button class="chip ${readyOnly ? 'on' : ''}" data-act="ready">Ready to book</button></div>
+    ${tagsInUse().length ? `<div class="scroll" style="margin-bottom:10px">${tagsInUse().map(t => `<button class="chip ${tagFilter === t ? 'on' : ''}" data-act="tag" data-v="${esc(t)}">${esc(t)}</button>`).join('')}</div>` : ''}
     <div id="list"></div>`;
 }
 
@@ -285,7 +291,7 @@ function openRestaurant(id) {
   const link = safeUrl(r.bookingLink), web = safeUrl(r.website);
   openSheet(`<div class="hd" style="margin:0 0 4px"><div><h2>${esc(r.name)}</h2><div class="mu">${esc([r.area, r.cuisine, r.city, r.price].filter(Boolean).join(' · '))}</div></div>
       ${r.wishlist ? '' : `<button class="star ${r.favourite ? 'on' : ''}" data-act="star" data-id="${esc(id)}" data-sheet="1" aria-label="Favourite">★</button>`}</div>
-    <div class="badges">${wishBadge(r)}${methodBadge(r)}${cardBadge(r)}${(r.meals || []).map(m => `<span class="badge">${esc(m)}</span>`).join('')}</div>
+    <div class="badges">${wishBadge(r)}${methodBadge(r)}${cardBadge(r)}${(r.meals || []).map(m => `<span class="badge">${esc(m)}</span>`).join('')}${(r.tags || []).map(t => `<span class="badge tag">${esc(t)}</span>`).join('')}</div>
     ${r.wishlist ? `<div class="note warn">You have not been here yet${r.added ? ` · added ${esc(dateLabel(r.added))}` : ''}.${r.why ? `<br>${esc(r.why)}` : ''}</div>
       <div class="seg">${['Want to try', 'Booked'].map(w => `<button class="${r.wishlist === w ? 'on' : ''}" data-act="wstatus" data-id="${esc(id)}" data-v="${w}">${w}</button>`).join('')}</div>` : ''}
     ${cardNote(r)}
@@ -395,6 +401,7 @@ function openEdit(id) {
     ${txt('e_website', 'Website', r.website, 'https://…', 'url')}${txt('e_phone', 'Phone', r.phone, '+34 …', 'tel')}
     <details class="more"><summary>Booking and other details</summary>
     <span class="lbl">Meals</span><div class="checks">${MEALS.map(m => `<label><input type="checkbox" name="e_meal" value="${m}" ${(r.meals || []).includes(m) ? 'checked' : ''}> ${m}</label>`).join('')}</div>
+    <span class="lbl">Tags</span><div class="checks" style="flex-wrap:wrap">${TAGS.map(t => `<label><input type="checkbox" name="e_tag" value="${esc(t)}" ${(r.tags || []).includes(t) ? 'checked' : ''}> ${esc(t)}</label>`).join('')}</div>
     <span class="lbl">Price</span>${sel('e_price', PRICES, r.price)}
     <span class="lbl">How you book</span>${sel('e_method', METHODS, r.method)}
     ${txt('e_bookingLink', 'Booking page link', r.bookingLink, 'https://…', 'url')}
@@ -410,16 +417,18 @@ async function saveEdit(id) {
   const g = k => $('e_' + k).value.trim();
   const next = {}; for (const k of FIELDS) next[k] = g(k);
   next.meals = [...document.querySelectorAll('input[name=e_meal]:checked')].map(x => x.value);
+  next.tags = [...document.querySelectorAll('input[name=e_tag]:checked')].map(x => x.value);
   if (!next.name) { toast('Give it a name.'); return; }
   if (id) {
     const r = find(id), diff = {};
-    for (const k of [...FIELDS, 'meals']) if (JSON.stringify(next[k]) !== JSON.stringify(r[k] ?? (k === 'meals' ? [] : ''))) diff[k] = next[k];
+    for (const k of [...FIELDS, 'meals', 'tags']) if (JSON.stringify(next[k]) !== JSON.stringify(r[k] ?? (k === 'meals' || k === 'tags' ? [] : ''))) diff[k] = next[k];
     if (!Object.keys(diff).length) { openRestaurant(id); return; }
     await upd(id, diff); openRestaurant(id); render();
     return;
   }
   if (!next.wishlist) delete next.wishlist; // keeps normal adds working before the Wishlist column exists in Notion
   if (!next.why) delete next.why;
+  if (!next.tags.length) delete next.tags;
   if (connected()) {
     try { const out = await post('/api/restaurants/add', next); S.restaurants.push(out.restaurant); save(); closeSheet(); render(); toast(next.wishlist ? 'Added to your wishlist ✓' : 'Added to Notion ✓'); }
     catch (e) { toast('Could not add: ' + e.message); }
@@ -464,7 +473,7 @@ function shareText() {
 }
 function defaultShare(only) {
   if (only) return [only];
-  const filtered = !!(q.trim() || city !== 'All' || favOnly || readyOnly || wishOnly);
+  const filtered = !!(q.trim() || city !== 'All' || favOnly || readyOnly || wishOnly || tagFilter);
   let base = visible();
   if (!filtered) base = base.filter(r => r.favourite && !r.wishlist);
   return base.map(r => r.id);
@@ -542,6 +551,7 @@ async function checkConn() {
   } catch (e) { out.innerHTML = `<div class="errbox">${esc(e.message)}</div>`; }
 }
 
+const DEMO_TAGS = { 'Far Nomo': ['Sea view', 'Terrace', 'Special occasion'], 'Filandón': ['Casual', 'Group-friendly'], 'Carbo': ['Terrace', 'Lively'] };
 const DEMO = [
   ['Far Nomo', 'Costa Brava', 'Llafranc', 'Japanese', 'CoverManager', 'https://example.com/far-nomo', '', '+34972300000', '', 'Unknown', true],
   ['Filandón', 'Madrid', '', 'Spanish', 'Own website', 'https://example.com/filandon', '', '+34910000001', '+34600000001', 'No', true],
@@ -586,6 +596,7 @@ const ACT = {
   tab: el => { view = el.dataset.v; closeSheet(); render(); window.scrollTo(0, 0); },
   city: el => { city = el.dataset.v; render(); },
   fav: () => { favOnly = !favOnly; render(); },
+  tag: el => { tagFilter = tagFilter === el.dataset.v ? '' : el.dataset.v; render(); },
   ready: () => { readyOnly = !readyOnly; render(); },
   wish: () => { wishOnly = !wishOnly; render(); },
   wstatus: el => { upd(el.dataset.id, { wishlist: el.dataset.v }); openRestaurant(el.dataset.id); render(); },
@@ -657,7 +668,7 @@ const ACT = {
   check: async () => { S.settings.baseUrl = $('baseUrl').value.trim(); S.settings.appKey = $('appKey').value.trim(); save(); await checkConn(); },
   savename: () => { S.settings.name = $('myName').value.trim().slice(0, 60); save(); toast('Saved'); },
   theme: el => { S.settings.theme = el.dataset.v; save(); render(); },
-  'demo-on': () => { S.demo = true; S.restaurants = JSON.parse(JSON.stringify(DEMO)); save(); view = 'places'; render(); },
+  'demo-on': () => { S.demo = true; S.restaurants = JSON.parse(JSON.stringify(DEMO)); for (const r of S.restaurants) r.tags = DEMO_TAGS[r.name] || []; save(); view = 'places'; render(); },
   'demo-off': () => { S.demo = false; S.restaurants = []; S.bookings = S.bookings.filter(b => !b.rid.startsWith('demo')); save(); render(); loadList(); },
 };
 document.addEventListener('click', e => {
