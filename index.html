@@ -167,7 +167,8 @@ function save() {
   catch { toast('Could not save: browser storage is full or blocked.'); }
 }
 let S = load();
-let view = 'places', city = 'All', q = '', groupBy = (S.settings && S.settings.groupBy) || 'az', favOnly = false, readyOnly = false, wishOnly = false, tagFilter = '', loading = false;
+let view = 'places', city = 'All', q = '', groupBy = ['fav', 'rating', 'visits', 'wish'].includes(S.settings && S.settings.groupBy) ? S.settings.groupBy : '', favOnly = false, readyOnly = false, wishOnly = false, tagFilter = '', loading = false;
+favOnly = groupBy === 'fav'; wishOnly = groupBy === 'wish';
 const SHARE_DEFAULTS = { lang: 'en', web: true, map: true, phone: false, notes: false };
 
 function applyTheme() {
@@ -226,19 +227,11 @@ const methodBadge = r => r.method && r.method !== 'Unknown' ? `<span class="badg
 function visible() {
   const t = q.trim().toLowerCase();
   return S.restaurants
-    .filter(r => (city === 'All' || r.city === city) && (!favOnly || r.favourite) && (!wishOnly || r.wishlist) && (!readyOnly || readyOf(r)) && (!tagFilter || (r.tags || []).includes(tagFilter)) && (!t || [r.name, r.area, r.cuisine, r.city, ...(r.tags || [])].join(' ').toLowerCase().includes(t)))
-    .sort((a, b) => (groupBy === 'visits' ? (b.visits || 0) - (a.visits || 0) : groupBy === 'rating' ? (scoreOf(b.id) || 0) - (scoreOf(a.id) || 0) : 0) || (b.favourite - a.favourite) || a.name.localeCompare(b.name));
+    .filter(r => (city === 'All' || r.city === city) && (!favOnly || r.favourite) && (!wishOnly || r.wishlist) && (groupBy !== 'rating' || (!r.wishlist && scoreOf(r.id))) && (groupBy !== 'visits' || (!r.wishlist && r.visits > 0)) && (!readyOnly || readyOf(r)) && (!tagFilter || (r.tags || []).includes(tagFilter)) && (!t || [r.name, r.area, r.cuisine, r.city, ...(r.tags || [])].join(' ').toLowerCase().includes(t)))
+    .sort((a, b) => (groupBy === 'visits' ? (b.visits || 0) - (a.visits || 0) : groupBy === 'rating' ? (scoreOf(b.id) || 0) - (scoreOf(a.id) || 0) : 0) || (groupBy === 'wish' ? 0 : b.favourite - a.favourite) || a.name.localeCompare(b.name));
 }
-const GROUPS = [['az', 'Favourites first'], ['cuisine', 'Cuisine'], ['rating', 'Top rated'], ['visits', 'Most visited'], ['city', 'City']];
-function groupsOf(items) {
-  if (groupBy === 'cuisine' || groupBy === 'city') {
-    const key = r => (groupBy === 'cuisine' ? r.cuisine : r.city) || (groupBy === 'cuisine' ? 'No cuisine yet' : 'No city');
-    const m = new Map();
-    for (const r of items) { const k = key(r); if (!m.has(k)) m.set(k, []); m.get(k).push(r); }
-    return [...m.entries()].sort((a, b) => (a[0].startsWith('No ') - b[0].startsWith('No ')) || b[1].length - a[1].length || a[0].localeCompare(b[0])).map(([k, v]) => ({ title: k, items: v }));
-  }
-  return [{ title: '', items }];
-}
+const GROUPS = [['fav', 'Favourites', r => !r.wishlist && r.favourite], ['rating', 'Top rated', r => !r.wishlist && scoreOf(r.id)], ['visits', 'Most visited', r => !r.wishlist && r.visits > 0], ['wish', 'To try', r => r.wishlist]];
+const groupsOf = items => [{ title: '', items }];
 function cardHtml(r) {
   const sub = [r.area, r.cuisine, r.city === 'Costa Brava' || r.city === 'Vienna' || city !== 'All' ? '' : r.city].filter(Boolean).join(' · ');
   return `<div class="rc ${r.wishlist ? 'wish' : ''}" role="button" tabindex="0" data-act="open" data-id="${esc(r.id)}"><div class="top"><div class="nm"><b>${esc(r.name)}</b><span>${esc(sub || r.city)}</span></div>
@@ -250,7 +243,7 @@ function cardHtml(r) {
 function renderList() {
   const items = visible(), el = $('list'); if (!el) return;
   el.innerHTML = items.length ? groupsOf(items).map(g => (g.title ? `<div class="grouphd">${esc(g.title)} · ${g.items.length}</div>` : '') + g.items.map(cardHtml).join('')).join('')
-    : `<p class="empty">${S.restaurants.length ? 'No restaurant matches these filters.' : connected() ? (loading ? 'Loading your restaurants…' : 'Nothing here yet. Pull the list from Notion with ⟳ or add a place with +.') : 'Open Settings to connect, or load the demo to try Mesa.'}</p>`;
+    : `<p class="empty">${S.restaurants.length ? (groupBy === 'rating' ? 'No scores yet. Open a restaurant, tap “Log a visit” and give it a score.' : groupBy === 'visits' ? 'No visits logged yet. Open a restaurant and tap “Log a visit”.' : 'No restaurant matches these filters.') : connected() ? (loading ? 'Loading your restaurants…' : 'Nothing here yet. Pull the list from Notion with ⟳ or add a place with +.') : 'Open Settings to connect, or load the demo to try Mesa.'}</p>`;
 }
 
 // Only tags that at least one place has, so the filter row never shows an empty choice.
@@ -264,10 +257,8 @@ function placesHtml() {
     ${st && !st.ok && connected() ? `<div class="errbox" style="margin:0 0 8px">${esc(st.message)}</div>` : ''}
     <div class="scroll">${['All', ...CITIES].map(c => `<button class="chip ${city === c ? 'on' : ''}" data-act="city" data-v="${c}">${c}<small>${count(c)}</small></button>`).join('')}</div>
     <input class="search" id="q" type="search" placeholder="Search name, area or cuisine" value="${esc(q)}" autocomplete="off">
-    <div class="scroll" style="margin-bottom:8px"><span class="mu" style="align-self:center;margin-right:2px">Group</span>${GROUPS.map(([k, l]) => `<button class="chip ${groupBy === k ? 'on' : ''}" data-act="group" data-v="${k}">${l}</button>`).join('')}</div>
+    <div class="chips" style="margin-bottom:8px">${GROUPS.map(([k, l, f]) => `<button class="chip ${groupBy === k ? 'on' : ''}" data-act="group" data-v="${k}">${k === 'fav' ? '★ ' : k === 'wish' ? '🔖 ' : ''}${l}<small>${S.restaurants.filter(f).length}</small></button>`).join('')}</div>
     <div class="chips" style="margin-bottom:${tagsInUse().length ? '8px' : '10px'}">
-      <button class="chip ${favOnly ? 'on' : ''}" data-act="fav">★ Favourites</button>
-      <button class="chip ${wishOnly ? 'on' : ''}" data-act="wish">🔖 To try<small>${S.restaurants.filter(r => r.wishlist).length}</small></button>
       <button class="chip ${readyOnly ? 'on' : ''}" data-act="ready">Ready to book</button></div>
     ${tagsInUse().length ? `<div class="scroll" style="margin-bottom:10px">${tagsInUse().map(t => `<button class="chip ${tagFilter === t ? 'on' : ''}" data-act="tag" data-v="${esc(t)}">${esc(t)}</button>`).join('')}</div>` : ''}
     <div id="list"></div>`;
@@ -637,7 +628,7 @@ function settingsHtml() {
       <p class="muted" style="margin-top:0">Mesa never asks for or stores card numbers. When a restaurant wants a card, you type it on their own booking page, ideally a one-time Revolut card. Mesa only records <i>whether</i> a card was needed.</p></div>
     <div class="card"><h3>Demo</h3>
       <div class="actions">${S.demo ? '<button class="btn wide" data-act="demo-off">Remove demo data</button>' : '<button class="btn wide" data-act="demo-on">Load demo data</button>'}</div></div>
-    <p class="mu" style="text-align:center">Mesa · build 2026-11-05.5</p></div>`;
+    <p class="mu" style="text-align:center">Mesa · build 2026-11-05.6</p></div>`;
 }
 async function checkConn() {
   const out = $('checkOut'); out.innerHTML = '<div class="okbox">Checking…</div>';
@@ -692,11 +683,9 @@ function toast(msg, label, fn) {
 const ACT = {
   tab: el => { view = el.dataset.v; closeSheet(); render(); window.scrollTo(0, 0); },
   city: el => { city = el.dataset.v; render(); },
-  group: el => { groupBy = el.dataset.v; S.settings.groupBy = groupBy; save(); render(); },
-  fav: () => { favOnly = !favOnly; render(); },
+  group: el => { groupBy = groupBy === el.dataset.v ? '' : el.dataset.v; favOnly = groupBy === 'fav'; wishOnly = groupBy === 'wish'; S.settings.groupBy = groupBy; save(); render(); },
   tag: el => { tagFilter = tagFilter === el.dataset.v ? '' : el.dataset.v; render(); },
   ready: () => { readyOnly = !readyOnly; render(); },
-  wish: () => { wishOnly = !wishOnly; render(); },
   wstatus: el => { upd(el.dataset.id, { wishlist: el.dataset.v }); openRestaurant(el.dataset.id); render(); },
   been: el => openVisit(el.dataset.id),
   visit: el => openVisit(el.dataset.id),
