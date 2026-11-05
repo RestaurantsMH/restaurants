@@ -540,7 +540,7 @@ function settingsHtml() {
       <p class="muted" style="margin-top:0">Mesa never asks for or stores card numbers. When a restaurant wants a card, you type it on their own booking page, ideally a one-time Revolut card. Mesa only records <i>whether</i> a card was needed.</p></div>
     <div class="card"><h3>Demo</h3>
       <div class="actions">${S.demo ? '<button class="btn wide" data-act="demo-off">Remove demo data</button>' : '<button class="btn wide" data-act="demo-on">Load demo data</button>'}</div></div>
-    <p class="mu" style="text-align:center">Mesa · build 2026-11-05.1</p></div>`;
+    <p class="mu" style="text-align:center">Mesa · build 2026-11-05.2</p></div>`;
 }
 async function checkConn() {
   const out = $('checkOut'); out.innerHTML = '<div class="okbox">Checking…</div>';
@@ -687,8 +687,23 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && connected() && Date.now() - S.at > 5 * 60e3) loadList(true); });
 
+/* ---------- add a place shared from Google Maps (Android share sheet; iPhone uses a Shortcut) ---------- */
+async function handleShare() {
+  const q = new URLSearchParams(location.search);
+  if (!q.has('text') && !q.has('url') && !q.has('title')) return;
+  const text = [q.get('title'), q.get('text')].filter(Boolean).join('\n'), url = q.get('url') || '';
+  history.replaceState(null, '', location.pathname);
+  if (!connected()) { toast('Connect Mesa under Settings first, then share the place again.'); return; }
+  try {
+    const r = await post('/api/restaurants/share', { text, url });
+    await loadList(true);
+    toast(r.existing ? `${r.restaurant.name} is already in your list` : `Added ${r.restaurant.name} to 🔖 To try`, 'Open', () => openRestaurant(r.restaurant.id));
+  } catch (e) { toast('Could not add it: ' + e.message); }
+}
+
 render();
 loadList(true);
+handleShare();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
 </body>

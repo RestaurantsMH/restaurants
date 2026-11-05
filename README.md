@@ -32,3 +32,9 @@ When a restaurant wants a card, use a one-time Revolut card on the restaurant's 
 4. Add to home screen.
 
 Icons: `python3 scripts/make-icons.py` (needs Pillow).
+
+## Add a place from Google Maps
+
+In Google Maps, open a place, tap Share and pick Mesa. It lands in 🔖 To try with its name and address, and nothing is added twice.
+- **Android:** install Mesa to the home screen first (Chrome, ⋮, Install app). Mesa then shows up in the share sheet.
+- **iPhone:** iOS cannot share straight into a web app, so use a Shortcut that sends the shared text to the Worker (`POST /api/restaurants/share` with the `X-App-Key` header and `{"text": …}` as JSON).
