@@ -202,6 +202,7 @@ async function loadList(quiet) {
     try { S.visits = (await post('/api/visits/list', {})).visits || []; } catch { /* the visit log may not be set up yet: keep the copy on this phone */ }
   } catch (e) { S.status.list = { at: Date.now(), ok: false, message: e.message }; }
   loading = false; save(); render();
+  scanBookings();
 }
 
 const find = id => S.restaurants.find(r => r.id === id);
@@ -321,6 +322,26 @@ function openRestaurant(id) {
       <button class="btn" data-act="share" data-id="${esc(id)}">Recommend ↗</button>
       ${r.wishlist ? `<button class="btn" data-act="remove" data-id="${esc(id)}">Remove from list</button>` : ''}
       <button class="btn" data-act="close">Close</button></div>`);
+}
+
+/* ---------- bookings from your confirmation emails ---------- */
+const plainName = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+async function scanBookings() {
+  if (!connected() || S.demo) return;
+  let out;
+  try { out = await post('/api/bookings/scan', {}); } catch { return; /* Gmail not connected or offline: nothing to do */ }
+  let added = 0;
+  for (const x of out.bookings || []) {
+    const n = plainName(x.name), r = S.restaurants.find(r => { const m = plainName(r.name); return m.length > 3 && n.length > 3 && (n === m || n.includes(m) || m.includes(n)); });
+    let b = S.bookings.find(y => y.key === x.key) || (r && S.bookings.find(y => y.rid === r.id && y.date === x.date && y.time === x.time && y.status !== 'cancelled'));
+    if (x.status === 'cancelled') { if (b && b.status === 'booked') { b.status = 'cancelled'; } continue; }
+    if (b) { b.key = b.key || x.key; if (x.cal) b.cal = true; continue; }
+    S.bookings.push({ id: 'e' + Date.now().toString(36) + added, key: x.key, rid: r ? r.id : '', name: r ? r.name : x.name, city: r ? r.city : '', date: x.date, time: x.time, party: x.party || 2, note: 'From your booking email', status: 'booked', cal: !!x.cal });
+    if (r && r.wishlist === 'Want to try' && x.date >= today()) upd(r.id, { wishlist: 'Booked' });
+    added++;
+  }
+  if (out.scanned || added) { save(); render(); }
+  if (added) toast(added === 1 ? 'Added a booking from your email' : `Added ${added} bookings from your email`);
 }
 
 /* ---------- visit log ---------- */
@@ -616,7 +637,7 @@ function settingsHtml() {
       <p class="muted" style="margin-top:0">Mesa never asks for or stores card numbers. When a restaurant wants a card, you type it on their own booking page, ideally a one-time Revolut card. Mesa only records <i>whether</i> a card was needed.</p></div>
     <div class="card"><h3>Demo</h3>
       <div class="actions">${S.demo ? '<button class="btn wide" data-act="demo-off">Remove demo data</button>' : '<button class="btn wide" data-act="demo-on">Load demo data</button>'}</div></div>
-    <p class="mu" style="text-align:center">Mesa · build 2026-11-05.4</p></div>`;
+    <p class="mu" style="text-align:center">Mesa · build 2026-11-05.5</p></div>`;
 }
 async function checkConn() {
   const out = $('checkOut'); out.innerHTML = '<div class="okbox">Checking…</div>';
