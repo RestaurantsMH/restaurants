@@ -306,7 +306,7 @@ function openRestaurant(id) {
     ${r.lastVisit ? `<p class="mu">Last visit ${esc(dateLabel(r.lastVisit))}${r.visits ? ` · ${r.visits} visit${r.visits > 1 ? 's' : ''}` : ''}</p>` : ''}
     <div class="actions">
       <button class="btn go wide" data-act="book" data-id="${esc(id)}">Book a table</button>
-      ${r.wishlist ? `<button class="btn wide" data-act="been" data-id="${esc(id)}">✓ I’ve been here</button>` : `<button class="btn wide" data-act="visit" data-id="${esc(id)}">+ Log a visit</button>`}
+      ${r.wishlist ? `<button class="btn wide" data-act="been" data-id="${esc(id)}">✓ I’ve been here</button><button class="btn wide" data-act="visit" data-id="${esc(id)}">+ Log a visit with a date</button>` : `<button class="btn wide" data-act="visit" data-id="${esc(id)}">+ Log a visit</button>`}
       ${web ? `<a class="btn" href="${esc(web)}" target="_blank" rel="noopener">Website</a>` : ''}
       ${r.phone ? `<a class="btn" href="tel:${esc(telDigits(r.phone))}">Call</a>` : ''}
       ${r.whatsapp ? `<a class="btn" href="https://wa.me/${esc(waDigits(r.whatsapp))}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
@@ -421,7 +421,37 @@ function bookText(r, d) {
 function readBook() {
   return { date: $('bkDate').value, time: $('bkTime').value, party: Math.max(1, Math.min(20, parseInt($('bkParty').dataset.v, 10) || 2)), note: $('bkNote').value.trim().slice(0, 200) };
 }
-function updateMsg(id) { const r = find(id), d = readBook(); if (r && d.date && d.time) $('bkMsg').textContent = bookText(r, d); }
+// Date, time and people go into the booking page for the engines that read them from the link (checked in a browser 2026-11-05):
+// TheFork widget (date + people), CoverManager /reservation/ module (date + time + people; the newer /reserve/ module ignores them), Myrestoo (date only). Other pages open as saved.
+function bookingUrl(r, d) {
+  const base = safeUrl(r.bookingLink) || safeUrl(r.website); if (!base) return { url: '', carries: '' };
+  let u; try { u = new URL(base); } catch { return { url: base, carries: '' }; }
+  const host = u.hostname.replace(/^www\./, ''), [y, m, day] = (d.date || '').split('-');
+  if (!y || !m || !day) return { url: base, carries: '' };
+  if (host === 'widget.thefork.com' && /^\/(?:[a-z]{2}(?:-[A-Za-z]{2})?\/)?[0-9a-f-]{36}\/?$/i.test(u.pathname)) {
+    u.searchParams.set('step', 'date'); u.searchParams.set('date', d.date); u.searchParams.set('pax', String(d.party));
+    return { url: u.href, carries: 'the date and number of people' };
+  }
+  if (host === 'covermanager.com' && /^\/reservation\/module_restaurant\//.test(u.pathname)) {
+    u.searchParams.set('day', `${day}-${m}-${y}`); u.searchParams.set('people', String(d.party)); if (d.time) u.searchParams.set('hour', d.time);
+    return { url: u.href, carries: 'the date, time and number of people' };
+  }
+  if (host.endsWith('.myrestoo.net')) {
+    if (u.pathname === '/') u.pathname = '/es/reservar';
+    if (/\/reservar\/?$/.test(u.pathname)) { u.searchParams.set('date', d.date); return { url: u.href, carries: 'the date' }; }
+  }
+  return { url: base, carries: '' };
+}
+function bookSummary(d) { return `${dateLabel(d.date)} · ${d.time} · ${d.party} ${d.party > 1 ? 'people' : 'person'}`; }
+function updateMsg(id) {
+  const r = find(id), d = readBook(); if (!r || !d.date || !d.time) return;
+  $('bkMsg').textContent = bookText(r, d);
+  const c = $('bkCarry'); if (!c) return;
+  const { url, carries } = bookingUrl(r, d);
+  c.innerHTML = !url ? '' : carries
+    ? `✓ The booking page opens with ${esc(carries)} already filled in. Check them there, then pick the time and confirm.`
+    : `This booking page cannot take your choices from Mesa, so you will have to enter them there: <b>${esc(bookSummary(d))}</b>.`;
+}
 
 function openBook(id, keep) {
   const r = find(id); if (!r) return;
@@ -435,7 +465,7 @@ function openBook(id, keep) {
     <label class="lbl" for="bkNote">Note for the restaurant (optional)</label><input class="field" id="bkNote" maxlength="200" placeholder="Allergies, birthday, high chair…" value="${esc(d.note)}">
     <span class="lbl">Message to send</span><div class="msg" id="bkMsg"></div>
     <div class="actions">
-      ${link ? `<button class="btn go wide" data-act="openpage" data-id="${esc(id)}">Open booking page ↗</button>` : `<div class="note wide">No booking page saved yet. Use WhatsApp or call, or add the link under “Edit details”.</div>`}
+      ${link ? `<button class="btn go wide" data-act="openpage" data-id="${esc(id)}">Open booking page ↗</button><div class="mu wide" id="bkCarry"></div>` : `<div class="note wide">No booking page saved yet. Use WhatsApp or call, or add the link under “Edit details”.</div>`}
       ${r.whatsapp ? `<button class="btn" data-act="wa" data-id="${esc(id)}">WhatsApp</button>` : ''}
       ${r.phone ? `<a class="btn" href="tel:${esc(telDigits(r.phone))}">Call</a>` : ''}
       <button class="btn" data-act="copymsg">Copy message</button>
@@ -645,7 +675,7 @@ function settingsHtml() {
       <p class="muted" style="margin-top:0">Mesa never asks for or stores card numbers. When a restaurant wants a card, you type it on their own booking page, ideally a one-time Revolut card. Mesa only records <i>whether</i> a card was needed.</p></div>
     <div class="card"><h3>Demo</h3>
       <div class="actions">${S.demo ? '<button class="btn wide" data-act="demo-off">Remove demo data</button>' : '<button class="btn wide" data-act="demo-on">Load demo data</button>'}</div></div>
-    <p class="mu" style="text-align:center">Mesa · build 2026-11-05.10</p></div>`;
+    <p class="mu" style="text-align:center">Mesa · build 2026-11-05.11</p></div>`;
 }
 async function checkConn() {
   const out = $('checkOut'); out.innerHTML = '<div class="okbox">Checking…</div>';
@@ -703,7 +733,12 @@ const ACT = {
   group: el => { groupBy = groupBy === el.dataset.v ? '' : el.dataset.v; favOnly = groupBy === 'fav'; wishOnly = groupBy === 'wish'; S.settings.groupBy = groupBy; save(); render(); },
   tag: el => { tagFilter = tagFilter === el.dataset.v ? '' : el.dataset.v; render(); },
   wstatus: el => { upd(el.dataset.id, { wishlist: el.dataset.v }); openRestaurant(el.dataset.id); render(); },
-  been: el => openVisit(el.dataset.id),
+  been: el => {
+    const id = el.dataset.id, r = find(id); if (!r) return;
+    const prev = { wishlist: r.wishlist, visits: r.visits || 0 };
+    upd(id, { wishlist: '', visits: Math.max(1, prev.visits) }); render(); openRestaurant(id);
+    toast('Marked as been. No date needed.', 'Undo', () => { upd(id, prev); render(); openRestaurant(id); });
+  },
   visit: el => openVisit(el.dataset.id),
   score: el => { visitScore = visitScore === +el.dataset.v ? 0 : +el.dataset.v; document.querySelectorAll('#vScore .chip').forEach(c => c.classList.toggle('on', +c.dataset.v === visitScore)); },
   savevisit: el => saveVisit(el.dataset.id),
@@ -745,7 +780,7 @@ const ACT = {
   },
   book: el => openBook(el.dataset.id),
   party: el => { const p = $('bkParty'), v = Math.max(1, Math.min(20, (parseInt(p.dataset.v, 10) || 2) + Number(el.dataset.v))); p.dataset.v = v; p.textContent = v; const f = $('bkMsg'); if (f) { const id = document.querySelector('[data-act=booked]')?.dataset.id; updateMsg(id); } },
-  openpage: el => { const r = find(el.dataset.id); const u = safeUrl(r.bookingLink) || safeUrl(r.website); if (u) window.open(u, '_blank', 'noopener'); },
+  openpage: el => { const r = find(el.dataset.id); const u = bookingUrl(r, readBook()).url; if (u) window.open(u, '_blank', 'noopener'); },
   wa: el => { const r = find(el.dataset.id); window.open(`https://wa.me/${waDigits(r.whatsapp)}?text=${encodeURIComponent(bookText(r, readBook()))}`, '_blank', 'noopener'); },
   copymsg: () => copyText($('bkMsg').textContent),
   booked: el => confirmBooked(el.dataset.id),
@@ -757,12 +792,13 @@ const ACT = {
   edit: el => openEdit(el.dataset.id),
   add: () => (connected() && !S.demo ? openQuickAdd() : openEdit('')),
   addfull: () => openEdit(''),
-  quickadd: async () => {
-    const text = $('qaText').value.trim();
+  quickadd: async el => {
+    const text = $('qaText').value.trim(), been = !!(el && el.dataset.been);
     if (!text) { toast('Type a name or paste a link first.'); return; }
     try {
       const r = await post('/api/restaurants/share', { text });
       closeSheet(); await loadList(true);
+      if (been && !r.existing) { await upd(r.restaurant.id, { wishlist: '', visits: 1 }); render(); toast(`Added ${r.restaurant.name} as a place you have been`, 'Open', () => openRestaurant(r.restaurant.id)); return; }
       toast(r.existing ? `${r.restaurant.name} is already in your list` : `Added ${r.restaurant.name} to 🔖 To try`, 'Open', () => openRestaurant(r.restaurant.id));
     } catch (e) { toast('Could not add it: ' + e.message); }
   },
@@ -812,7 +848,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && co
 function openQuickAdd() {
   openSheet(`<h2>Add a place</h2><p class="muted">Type the name, or paste a Google Maps link or the restaurant’s website. It goes to 🔖 To try, and Mesa finds the booking details within a couple of hours.</p>
     <input class="field" id="qaText" placeholder="Name, Google link or website" autocomplete="off" autocapitalize="words">
-    <div class="actions"><button class="btn go" data-act="quickadd">Add to To try</button><button class="btn" data-act="addfull">Fill in details myself</button><button class="btn wide" data-act="close">Cancel</button></div>`);
+    <div class="actions"><button class="btn go" data-act="quickadd">Add to To try</button><button class="btn" data-act="quickadd" data-been="1">I’ve already been</button><button class="btn" data-act="addfull">Fill in details myself</button><button class="btn wide" data-act="close">Cancel</button></div>`);
   setTimeout(() => { const el = $('qaText'); if (el) el.focus(); }, 50);
 }
 
