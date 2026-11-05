@@ -150,7 +150,7 @@ const dateLabel = (s, loc = 'en-GB') => parseYmd(s).toLocaleDateString(loc, { we
 
 const STORE_KEY = 'mesa.v1';
 const CITIES = ['Madrid', 'Costa Brava', 'Vienna'];
-const METHODS = ['CoverManager', 'Molzait', 'TheFork', 'Own website', 'Phone', 'WhatsApp', 'Email', 'Walk-in', 'Unknown'];
+const METHODS = ['CoverManager', 'Molzait', 'TheFork', 'Myrestoo', 'Agora POS', 'Own website', 'Phone', 'WhatsApp', 'Email', 'Walk-in', 'Unknown'];
 const CARDS = [['Unknown', 'Not known yet'], ['No', 'No card needed'], ['Yes - guarantee', 'Card holds the table'], ['Yes - deposit', 'Deposit / prepayment']];
 const PRICES = ['', '€', '€€', '€€€', '€€€€'];
 const MEALS = ['Lunch', 'Dinner', 'Brunch'];
@@ -540,7 +540,7 @@ function settingsHtml() {
       <p class="muted" style="margin-top:0">Mesa never asks for or stores card numbers. When a restaurant wants a card, you type it on their own booking page, ideally a one-time Revolut card. Mesa only records <i>whether</i> a card was needed.</p></div>
     <div class="card"><h3>Demo</h3>
       <div class="actions">${S.demo ? '<button class="btn wide" data-act="demo-off">Remove demo data</button>' : '<button class="btn wide" data-act="demo-on">Load demo data</button>'}</div></div>
-    <p class="mu" style="text-align:center">Mesa · build 2026-11-04.1</p></div>`;
+    <p class="mu" style="text-align:center">Mesa · build 2026-11-05.1</p></div>`;
 }
 async function checkConn() {
   const out = $('checkOut'); out.innerHTML = '<div class="okbox">Checking…</div>';
