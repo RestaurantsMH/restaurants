@@ -167,7 +167,7 @@ function save() {
   catch { toast('Could not save: browser storage is full or blocked.'); }
 }
 let S = load();
-let view = 'places', city = 'All', q = '', groupBy = ['fav', 'rating', 'visits', 'wish'].includes(S.settings && S.settings.groupBy) ? S.settings.groupBy : '', favOnly = false, readyOnly = false, wishOnly = false, tagFilter = '', loading = false;
+let view = 'places', city = 'All', q = '', groupBy = ['fav', 'rating', 'visits', 'wish'].includes(S.settings && S.settings.groupBy) ? S.settings.groupBy : '', favOnly = false, wishOnly = false, tagFilter = '', loading = false;
 favOnly = groupBy === 'fav'; wishOnly = groupBy === 'wish';
 const SHARE_DEFAULTS = { lang: 'en', web: true, map: true, phone: false, notes: false };
 
@@ -217,7 +217,6 @@ async function upd(id, fields) {
 }
 
 /* ---------- list ---------- */
-const readyOf = r => !!(r.bookingLink || r.website || r.phone || r.whatsapp);
 const cardBadge = r => r.card === 'No' ? '<span class="badge ok">No card</span>'
   : r.card === 'Yes - guarantee' ? '<span class="badge warn">💳 Card holds table</span>'
   : r.card === 'Yes - deposit' ? '<span class="badge warn">💳 Deposit</span>' : '<span class="badge">Card: ?</span>';
@@ -227,7 +226,7 @@ const methodBadge = r => r.method && r.method !== 'Unknown' ? `<span class="badg
 function visible() {
   const t = q.trim().toLowerCase();
   return S.restaurants
-    .filter(r => (city === 'All' || r.city === city) && (!favOnly || r.favourite) && (!wishOnly || r.wishlist) && (groupBy !== 'rating' || (!r.wishlist && scoreOf(r.id))) && (groupBy !== 'visits' || (!r.wishlist && r.visits > 0)) && (!readyOnly || readyOf(r)) && (!tagFilter || (r.tags || []).includes(tagFilter)) && (!t || [r.name, r.area, r.cuisine, r.city, ...(r.tags || [])].join(' ').toLowerCase().includes(t)))
+    .filter(r => (city === 'All' || r.city === city) && (!favOnly || r.favourite) && (!wishOnly || r.wishlist) && (groupBy !== 'rating' || (!r.wishlist && scoreOf(r.id))) && (groupBy !== 'visits' || (!r.wishlist && r.visits > 0)) && (!tagFilter || (r.tags || []).includes(tagFilter)) && (!t || [r.name, r.area, r.cuisine, r.city, ...(r.tags || [])].join(' ').toLowerCase().includes(t)))
     .sort((a, b) => (groupBy === 'visits' ? (b.visits || 0) - (a.visits || 0) : groupBy === 'rating' ? (scoreOf(b.id) || 0) - (scoreOf(a.id) || 0) : 0) || (groupBy === 'wish' ? 0 : b.favourite - a.favourite) || a.name.localeCompare(b.name));
 }
 const GROUPS = [['fav', 'Favourites', r => !r.wishlist && r.favourite], ['rating', 'Top rated', r => !r.wishlist && scoreOf(r.id)], ['visits', 'Most visited', r => !r.wishlist && r.visits > 0], ['wish', 'To try', r => r.wishlist]];
@@ -257,9 +256,7 @@ function placesHtml() {
     ${st && !st.ok && connected() ? `<div class="errbox" style="margin:0 0 8px">${esc(st.message)}</div>` : ''}
     <div class="scroll">${['All', ...CITIES].map(c => `<button class="chip ${city === c ? 'on' : ''}" data-act="city" data-v="${c}">${c}<small>${count(c)}</small></button>`).join('')}</div>
     <input class="search" id="q" type="search" placeholder="Search name, area or cuisine" value="${esc(q)}" autocomplete="off">
-    <div class="chips" style="margin-bottom:8px">${GROUPS.map(([k, l, f]) => `<button class="chip ${groupBy === k ? 'on' : ''}" data-act="group" data-v="${k}">${k === 'fav' ? '★ ' : k === 'wish' ? '🔖 ' : ''}${l}<small>${S.restaurants.filter(f).length}</small></button>`).join('')}</div>
-    <div class="chips" style="margin-bottom:${tagsInUse().length ? '8px' : '10px'}">
-      <button class="chip ${readyOnly ? 'on' : ''}" data-act="ready">Ready to book</button></div>
+    <div class="chips" style="margin-bottom:${tagsInUse().length ? '8px' : '10px'}">${GROUPS.map(([k, l, f]) => `<button class="chip ${groupBy === k ? 'on' : ''}" data-act="group" data-v="${k}">${k === 'fav' ? '★ ' : k === 'wish' ? '🔖 ' : ''}${l}<small>${S.restaurants.filter(f).length}</small></button>`).join('')}</div>
     ${tagsInUse().length ? `<div class="scroll" style="margin-bottom:10px">${tagsInUse().map(t => `<button class="chip ${tagFilter === t ? 'on' : ''}" data-act="tag" data-v="${esc(t)}">${esc(t)}</button>`).join('')}</div>` : ''}
     <div id="list"></div>`;
 }
@@ -561,7 +558,7 @@ function shareText() {
 }
 function defaultShare(only) {
   if (only) return [only];
-  const filtered = !!(q.trim() || city !== 'All' || favOnly || readyOnly || wishOnly || tagFilter);
+  const filtered = !!(q.trim() || city !== 'All' || favOnly || wishOnly || tagFilter);
   let base = visible();
   if (!filtered) base = base.filter(r => r.favourite && !r.wishlist);
   return base.map(r => r.id);
@@ -628,7 +625,7 @@ function settingsHtml() {
       <p class="muted" style="margin-top:0">Mesa never asks for or stores card numbers. When a restaurant wants a card, you type it on their own booking page, ideally a one-time Revolut card. Mesa only records <i>whether</i> a card was needed.</p></div>
     <div class="card"><h3>Demo</h3>
       <div class="actions">${S.demo ? '<button class="btn wide" data-act="demo-off">Remove demo data</button>' : '<button class="btn wide" data-act="demo-on">Load demo data</button>'}</div></div>
-    <p class="mu" style="text-align:center">Mesa · build 2026-11-05.7</p></div>`;
+    <p class="mu" style="text-align:center">Mesa · build 2026-11-05.8</p></div>`;
 }
 async function checkConn() {
   const out = $('checkOut'); out.innerHTML = '<div class="okbox">Checking…</div>';
@@ -685,7 +682,6 @@ const ACT = {
   city: el => { city = el.dataset.v; render(); },
   group: el => { groupBy = groupBy === el.dataset.v ? '' : el.dataset.v; favOnly = groupBy === 'fav'; wishOnly = groupBy === 'wish'; S.settings.groupBy = groupBy; save(); render(); },
   tag: el => { tagFilter = tagFilter === el.dataset.v ? '' : el.dataset.v; render(); },
-  ready: () => { readyOnly = !readyOnly; render(); },
   wstatus: el => { upd(el.dataset.id, { wishlist: el.dataset.v }); openRestaurant(el.dataset.id); render(); },
   been: el => openVisit(el.dataset.id),
   visit: el => openVisit(el.dataset.id),
