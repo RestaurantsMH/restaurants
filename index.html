@@ -242,7 +242,7 @@ function cardHtml(r) {
 function renderList() {
   const items = visible(), el = $('list'); if (!el) return;
   el.innerHTML = items.length ? groupsOf(items).map(g => (g.title ? `<div class="grouphd">${esc(g.title)} · ${g.items.length}</div>` : '') + g.items.map(cardHtml).join('')).join('')
-    : `<p class="empty">${S.restaurants.length ? (groupBy === 'rating' ? 'No scores yet. Open a restaurant, tap “Log a visit” and give it a score.' : groupBy === 'visits' ? 'No visits logged yet. Open a restaurant and tap “Log a visit”.' : 'No restaurant matches these filters.') : connected() ? (loading ? 'Loading your restaurants…' : 'Nothing here yet. Pull the list from Notion with ⟳ or add a place with +.') : 'Open Settings to connect, or load the demo to try Mesa.'}</p>`;
+    : `<p class="empty">${S.restaurants.length ? (groupBy === 'rating' ? 'No scores yet. Open a restaurant and tap a score, or log a visit.' : groupBy === 'visits' ? 'No visits logged yet. Open a restaurant and tap “Log a visit”.' : 'No restaurant matches these filters.') : connected() ? (loading ? 'Loading your restaurants…' : 'Nothing here yet. Pull the list from Notion with ⟳ or add a place with +.') : 'Open Settings to connect, or load the demo to try Mesa.'}</p>`;
 }
 
 // Only tags that at least one place has, so the filter row never shows an empty choice.
@@ -252,7 +252,7 @@ function placesHtml() {
   const st = S.status.list;
   const pill = S.demo ? '<span class="pill">Demo</span>' : !connected() ? '<span class="pill bad">Not connected</span>'
     : loading ? '<span class="pill">Loading…</span>' : st && !st.ok ? '<span class="pill bad" data-act="reload">Offline copy ⟳</span>' : `<button class="pill" data-act="reload">⟳ ${S.at ? new Date(S.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Load'}</button>`;
-  return `<div class="hd"><h1>Mesa</h1><div class="chips" style="flex-wrap:nowrap;align-items:center">${(S.visits || []).length ? '<button class="pill" data-act="rankings">Rankings</button>' : ''}${S.restaurants.length ? '<button class="pill" data-act="share">Share ↗</button>' : ''}${pill}</div></div>
+  return `<div class="hd"><h1>Mesa</h1><div class="chips" style="flex-wrap:nowrap;align-items:center">${(S.visits || []).length || S.restaurants.some(r => r.rating) ? '<button class="pill" data-act="rankings">Rankings</button>' : ''}${S.restaurants.length ? '<button class="pill" data-act="share">Share ↗</button>' : ''}${pill}</div></div>
     ${st && !st.ok && connected() ? `<div class="errbox" style="margin:0 0 8px">${esc(st.message)}</div>` : ''}
     <div class="scroll">${['All', ...CITIES].map(c => `<button class="chip ${city === c ? 'on' : ''}" data-act="city" data-v="${c}">${c}<small>${count(c)}</small></button>`).join('')}</div>
     <input class="search" id="q" type="search" placeholder="Search name, area or cuisine" value="${esc(q)}" autocomplete="off">
@@ -297,6 +297,7 @@ function openRestaurant(id) {
       <div class="seg">${['Want to try', 'Booked'].map(w => `<button class="${r.wishlist === w ? 'on' : ''}" data-act="wstatus" data-id="${esc(id)}" data-v="${w}">${w}</button>`).join('')}</div>` : ''}
     ${cardNote(r)}
     ${r.notes ? `<div class="note">${esc(r.notes)}</div>` : ''}
+    ${ratingHtml(r)}
     ${visitsHtml(r)}
     ${r.lastVisit ? `<p class="mu">Last visit ${esc(dateLabel(r.lastVisit))}${r.visits ? ` · ${r.visits} visit${r.visits > 1 ? 's' : ''}` : ''}</p>` : ''}
     <div class="actions">
@@ -334,7 +335,9 @@ async function scanBookings() {
 
 /* ---------- visit log ---------- */
 const visitsOf = id => (S.visits || []).filter(v => v.restaurantId === id).sort((a, b) => b.date.localeCompare(a.date));
-const scoreOf = id => { const v = visitsOf(id).filter(x => x.rating); return v.length ? v.reduce((a, x) => a + x.rating, 0) / v.length : null; };
+const visitAvg = id => { const v = visitsOf(id).filter(x => x.rating); return v.length ? v.reduce((a, x) => a + x.rating, 0) / v.length : null; };
+// Your own overall score wins; without one, the average of the scores on your logged visits.
+const scoreOf = id => { const r = find(id); return (r && r.rating) || visitAvg(id); };
 const fmtScore = n => (Math.round(n * 10) / 10).toString();
 const scoreBadge = r => { const n = scoreOf(r.id); return n ? `<span class="badge ok">${fmtScore(n)}/10</span>` : ''; };
 let visitScore = 0;
@@ -379,13 +382,19 @@ async function deleteVisit(vid) {
 }
 function visitsHtml(r) {
   const v = visitsOf(r.id); if (!v.length) return '';
-  const avg = scoreOf(r.id);
+  const avg = visitAvg(r.id);
   return `<div class="card" style="margin:10px 0"><h3 style="margin:0 0 6px">Your visits${avg ? ` · ${fmtScore(avg)}/10 average` : ''}</h3>${v.slice(0, 8).map(x => `<div class="shgrp" style="align-items:flex-start;gap:8px"><div><b style="font-size:14px">${esc(dateLabel(x.date))}${x.rating ? ` · ${x.rating}/10` : ''}</b>${x.ate ? `<div class="mu">${esc(x.ate)}</div>` : ''}${x.notes ? `<div class="mu">${esc(x.notes)}</div>` : ''}</div><button class="chip" data-act="delvisit" data-id="${esc(x.id)}" aria-label="Delete visit">✕</button></div>`).join('')}${v.length > 8 ? `<p class="mu">And ${v.length - 8} earlier.</p>` : ''}</div>`;
+}
+function ratingHtml(r) {
+  if (r.wishlist) return '';
+  return `<div style="margin:10px 0"><span class="lbl">Your score${r.rating ? ` · ${r.rating}/10` : ''}</span>
+    <div class="scroll">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => `<button class="chip ${r.rating === n ? 'on' : ''}" data-act="rate" data-id="${esc(r.id)}" data-v="${n}">${n}</button>`).join('')}</div>
+    <p class="mu" style="margin:4px 0 0">${r.rating ? 'Tap your score again to clear it.' : 'Rate it without logging a visit, for places you already know.'}</p></div>`;
 }
 function openRankings() {
   const rows = S.restaurants.filter(r => !r.wishlist).map(r => ({ r, n: scoreOf(r.id), c: visitsOf(r.id).length })).filter(x => x.n);
   const rank = (list, k) => [...list].sort((a, b) => b.n - a.n || b.c - a.c || a.r.name.localeCompare(b.r.name)).slice(0, k)
-    .map((x, i) => `<div class="shgrp" data-act="open" data-id="${esc(x.r.id)}" role="button" tabindex="0"><span><b>${i + 1}.</b> ${esc(x.r.name)}</span><span class="mu">${fmtScore(x.n)}/10 · ${x.c} visit${x.c > 1 ? 's' : ''}</span></div>`).join('');
+    .map((x, i) => `<div class="shgrp" data-act="open" data-id="${esc(x.r.id)}" role="button" tabindex="0"><span><b>${i + 1}.</b> ${esc(x.r.name)}</span><span class="mu">${fmtScore(x.n)}/10${x.c ? ` · ${x.c} visit${x.c > 1 ? 's' : ''}` : ''}</span></div>`).join('');
   const group = key => [...new Set(rows.map(x => x.r[key]).filter(Boolean))].sort().map(g => ({ g, list: rows.filter(x => x.r[key] === g) })).filter(x => x.list.length >= 2);
   const most = [...S.restaurants].filter(r => !r.wishlist && r.visits).sort((a, b) => b.visits - a.visits || a.name.localeCompare(b.name)).slice(0, 5);
   openSheet(`<h2>Rankings</h2>${rows.length ? `<h3 class="grouphd">Top rated</h3>${rank(rows, 10)}
@@ -625,7 +634,7 @@ function settingsHtml() {
       <p class="muted" style="margin-top:0">Mesa never asks for or stores card numbers. When a restaurant wants a card, you type it on their own booking page, ideally a one-time Revolut card. Mesa only records <i>whether</i> a card was needed.</p></div>
     <div class="card"><h3>Demo</h3>
       <div class="actions">${S.demo ? '<button class="btn wide" data-act="demo-off">Remove demo data</button>' : '<button class="btn wide" data-act="demo-on">Load demo data</button>'}</div></div>
-    <p class="mu" style="text-align:center">Mesa · build 2026-11-05.8</p></div>`;
+    <p class="mu" style="text-align:center">Mesa · build 2026-11-05.9</p></div>`;
 }
 async function checkConn() {
   const out = $('checkOut'); out.innerHTML = '<div class="okbox">Checking…</div>';
@@ -689,6 +698,7 @@ const ACT = {
   savevisit: el => saveVisit(el.dataset.id),
   delvisit: el => deleteVisit(el.dataset.id),
   rankings: () => openRankings(),
+  rate: async el => { const id = el.dataset.id, r = find(id), n = +el.dataset.v; if (!r) return; await upd(id, { rating: r.rating === n ? null : n }); render(); openRestaurant(id); },
   remove: async el => {
     const id = el.dataset.id, r = find(id); if (!r) return;
     const real = connected() && /^[0-9a-f-]{32,36}$/i.test(id);
