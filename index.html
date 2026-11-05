@@ -157,7 +157,7 @@ const MEALS = ['Lunch', 'Dinner', 'Brunch'];
 const TAGS = ['Terrace', 'Sea view', 'Group-friendly', 'Kids welcome', 'Romantic', 'Special occasion', 'Casual', 'Fine dining', 'Vegetarian options', 'Dog-friendly', 'Quiet', 'Lively'];
 
 /* ---------- state ---------- */
-function blank() { return { restaurants: [], at: 0, bookings: [], settings: { baseUrl: '', appKey: '', theme: 'dark', name: '', phone: '', share: { lang: 'en', web: true, map: true, phone: false, notes: false } }, status: {}, demo: false }; }
+function blank() { return { restaurants: [], visits: [], at: 0, bookings: [], settings: { baseUrl: '', appKey: '', theme: 'dark', name: '', phone: '', share: { lang: 'en', web: true, map: true, phone: false, notes: false } }, status: {}, demo: false }; }
 function load() {
   try { const o = JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); const s = Object.assign(blank(), o); s.settings = Object.assign(blank().settings, o.settings); return s; }
   catch { return blank(); }
@@ -199,6 +199,7 @@ async function loadList(quiet) {
   try {
     const out = await post('/api/restaurants/list', {});
     S.restaurants = out.restaurants; S.at = Date.now(); S.status.list = { at: S.at, ok: true, message: '' };
+    try { S.visits = (await post('/api/visits/list', {})).visits || []; } catch { /* the visit log may not be set up yet: keep the copy on this phone */ }
   } catch (e) { S.status.list = { at: Date.now(), ok: false, message: e.message }; }
   loading = false; save(); render();
 }
@@ -225,9 +226,9 @@ function visible() {
   const t = q.trim().toLowerCase();
   return S.restaurants
     .filter(r => (city === 'All' || r.city === city) && (!favOnly || r.favourite) && (!wishOnly || r.wishlist) && (!readyOnly || readyOf(r)) && (!tagFilter || (r.tags || []).includes(tagFilter)) && (!t || [r.name, r.area, r.cuisine, r.city, ...(r.tags || [])].join(' ').toLowerCase().includes(t)))
-    .sort((a, b) => (groupBy === 'visits' ? (b.visits || 0) - (a.visits || 0) : 0) || (b.favourite - a.favourite) || a.name.localeCompare(b.name));
+    .sort((a, b) => (groupBy === 'visits' ? (b.visits || 0) - (a.visits || 0) : groupBy === 'rating' ? (scoreOf(b.id) || 0) - (scoreOf(a.id) || 0) : 0) || (b.favourite - a.favourite) || a.name.localeCompare(b.name));
 }
-const GROUPS = [['az', 'Favourites first'], ['cuisine', 'Cuisine'], ['visits', 'Most visited'], ['city', 'City']];
+const GROUPS = [['az', 'Favourites first'], ['cuisine', 'Cuisine'], ['rating', 'Top rated'], ['visits', 'Most visited'], ['city', 'City']];
 function groupsOf(items) {
   if (groupBy === 'cuisine' || groupBy === 'city') {
     const key = r => (groupBy === 'cuisine' ? r.cuisine : r.city) || (groupBy === 'cuisine' ? 'No cuisine yet' : 'No city');
@@ -242,7 +243,7 @@ function cardHtml(r) {
   return `<div class="rc ${r.wishlist ? 'wish' : ''}" role="button" tabindex="0" data-act="open" data-id="${esc(r.id)}"><div class="top"><div class="nm"><b>${esc(r.name)}</b><span>${esc(sub || r.city)}</span></div>
     ${r.wishlist ? '' : `<button class="star ${r.favourite ? 'on' : ''}" data-act="star" data-id="${esc(r.id)}" aria-label="Favourite">★</button>`}</div>
     ${r.wishlist && r.why ? `<span class="mu" style="display:block;margin-top:4px">${esc(r.why)}</span>` : ''}
-    <div class="badges">${wishBadge(r)}${methodBadge(r)}${cardBadge(r)}${r.visits ? `<span class="badge">${r.visits} visit${r.visits > 1 ? 's' : ''}</span>` : ''}</div>
+    <div class="badges">${wishBadge(r)}${methodBadge(r)}${cardBadge(r)}${scoreBadge(r)}${r.visits ? `<span class="badge">${r.visits} visit${r.visits > 1 ? 's' : ''}</span>` : ''}</div>
     ${(r.tags || []).length ? `<div class="badges" style="margin-top:6px">${r.tags.map(t => `<span class="badge tag">${esc(t)}</span>`).join('')}</div>` : ''}</div>`;
 }
 function renderList() {
@@ -258,7 +259,7 @@ function placesHtml() {
   const st = S.status.list;
   const pill = S.demo ? '<span class="pill">Demo</span>' : !connected() ? '<span class="pill bad">Not connected</span>'
     : loading ? '<span class="pill">Loading…</span>' : st && !st.ok ? '<span class="pill bad" data-act="reload">Offline copy ⟳</span>' : `<button class="pill" data-act="reload">⟳ ${S.at ? new Date(S.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Load'}</button>`;
-  return `<div class="hd"><h1>Mesa</h1><div class="chips" style="flex-wrap:nowrap;align-items:center">${S.restaurants.length ? '<button class="pill" data-act="share">Share ↗</button>' : ''}${pill}</div></div>
+  return `<div class="hd"><h1>Mesa</h1><div class="chips" style="flex-wrap:nowrap;align-items:center">${(S.visits || []).length ? '<button class="pill" data-act="rankings">Rankings</button>' : ''}${S.restaurants.length ? '<button class="pill" data-act="share">Share ↗</button>' : ''}${pill}</div></div>
     ${st && !st.ok && connected() ? `<div class="errbox" style="margin:0 0 8px">${esc(st.message)}</div>` : ''}
     <div class="scroll">${['All', ...CITIES].map(c => `<button class="chip ${city === c ? 'on' : ''}" data-act="city" data-v="${c}">${c}<small>${count(c)}</small></button>`).join('')}</div>
     <input class="search" id="q" type="search" placeholder="Search name, area or cuisine" value="${esc(q)}" autocomplete="off">
@@ -307,10 +308,11 @@ function openRestaurant(id) {
       <div class="seg">${['Want to try', 'Booked'].map(w => `<button class="${r.wishlist === w ? 'on' : ''}" data-act="wstatus" data-id="${esc(id)}" data-v="${w}">${w}</button>`).join('')}</div>` : ''}
     ${cardNote(r)}
     ${r.notes ? `<div class="note">${esc(r.notes)}</div>` : ''}
+    ${visitsHtml(r)}
     ${r.lastVisit ? `<p class="mu">Last visit ${esc(dateLabel(r.lastVisit))}${r.visits ? ` · ${r.visits} visit${r.visits > 1 ? 's' : ''}` : ''}</p>` : ''}
     <div class="actions">
       <button class="btn go wide" data-act="book" data-id="${esc(id)}">Book a table</button>
-      ${r.wishlist ? `<button class="btn wide" data-act="been" data-id="${esc(id)}">✓ I’ve been here</button>` : ''}
+      ${r.wishlist ? `<button class="btn wide" data-act="been" data-id="${esc(id)}">✓ I’ve been here</button>` : `<button class="btn wide" data-act="visit" data-id="${esc(id)}">+ Log a visit</button>`}
       ${web ? `<a class="btn" href="${esc(web)}" target="_blank" rel="noopener">Website</a>` : ''}
       ${r.phone ? `<a class="btn" href="tel:${esc(telDigits(r.phone))}">Call</a>` : ''}
       ${r.whatsapp ? `<a class="btn" href="https://wa.me/${esc(waDigits(r.whatsapp))}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
@@ -319,6 +321,69 @@ function openRestaurant(id) {
       <button class="btn" data-act="share" data-id="${esc(id)}">Recommend ↗</button>
       ${r.wishlist ? `<button class="btn" data-act="remove" data-id="${esc(id)}">Remove from list</button>` : ''}
       <button class="btn" data-act="close">Close</button></div>`);
+}
+
+/* ---------- visit log ---------- */
+const visitsOf = id => (S.visits || []).filter(v => v.restaurantId === id).sort((a, b) => b.date.localeCompare(a.date));
+const scoreOf = id => { const v = visitsOf(id).filter(x => x.rating); return v.length ? v.reduce((a, x) => a + x.rating, 0) / v.length : null; };
+const fmtScore = n => (Math.round(n * 10) / 10).toString();
+const scoreBadge = r => { const n = scoreOf(r.id); return n ? `<span class="badge ok">${fmtScore(n)}/10</span>` : ''; };
+let visitScore = 0;
+function openVisit(id, keep) {
+  const r = find(id); if (!r) return;
+  const d = keep || {}; visitScore = d.rating || 0;
+  openSheet(`<button class="back" data-act="open" data-id="${esc(id)}">‹ ${esc(r.name)}</button><h2>Log a visit</h2>
+    <label class="lbl" for="vDate">Date</label><input class="field" id="vDate" type="date" value="${esc(d.date || today())}" max="${today()}">
+    <span class="lbl">Score out of 10 (optional)</span>
+    <div class="scroll" id="vScore">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => `<button class="chip ${visitScore === n ? 'on' : ''}" data-act="score" data-v="${n}">${n}</button>`).join('')}</div>
+    <label class="lbl" for="vAte">What did you eat?</label><input class="field" id="vAte" maxlength="400" placeholder="Dishes, drinks, what to order again" value="${esc(d.ate || '')}">
+    <label class="lbl" for="vNotes">Note (optional)</label><input class="field" id="vNotes" maxlength="400" placeholder="Table, service, who came" value="${esc(d.notes || '')}">
+    <div class="actions"><button class="btn go" data-act="savevisit" data-id="${esc(id)}">Save visit</button><button class="btn" data-act="open" data-id="${esc(id)}">Cancel</button></div>`);
+}
+async function saveVisit(id) {
+  const r = find(id); if (!r) return;
+  const v = { date: $('vDate').value, rating: visitScore || null, ate: $('vAte').value.trim(), notes: $('vNotes').value.trim() };
+  if (!v.date) { toast('Pick the date first.'); return; }
+  let saved = { id: 'lv' + Date.now().toString(36), restaurantId: id, ...v };
+  if (connected() && /^[0-9a-f-]{32,36}$/i.test(id) && !S.demo) {
+    try {
+      const out = await post('/api/visits/add', { restaurantId: id, name: r.name, ...v });
+      saved = out.visit; Object.assign(r, out.restaurant);
+    } catch (e) { toast('Not saved to Notion: ' + e.message); return; }
+  } else {
+    r.visits = (r.visits || 0) + 1; r.lastVisit = [r.lastVisit, v.date].filter(Boolean).sort().at(-1); r.wishlist = '';
+  }
+  S.visits = [...(S.visits || []), saved]; save(); closeSheet(); render();
+  toast(r.favourite ? 'Visit saved' : 'Visit saved. Make it a favourite?', r.favourite ? '' : '★ Favourite', () => { upd(id, { favourite: true }); render(); });
+}
+async function deleteVisit(vid) {
+  const v = (S.visits || []).find(x => x.id === vid); if (!v) return;
+  const r = find(v.restaurantId);
+  if (connected() && /^[0-9a-f-]{32,36}$/i.test(vid) && !S.demo) {
+    try { const out = await post('/api/visits/delete', { id: vid }); if (r && out.restaurant) Object.assign(r, out.restaurant); }
+    catch (e) { toast('Not deleted: ' + e.message); return; }
+  } else if (r) {
+    r.visits = Math.max(0, (r.visits || 1) - 1);
+  }
+  S.visits = S.visits.filter(x => x.id !== vid); save(); render();
+  if (r) openRestaurant(r.id);
+}
+function visitsHtml(r) {
+  const v = visitsOf(r.id); if (!v.length) return '';
+  const avg = scoreOf(r.id);
+  return `<div class="card" style="margin:10px 0"><h3 style="margin:0 0 6px">Your visits${avg ? ` · ${fmtScore(avg)}/10 average` : ''}</h3>${v.slice(0, 8).map(x => `<div class="shgrp" style="align-items:flex-start;gap:8px"><div><b style="font-size:14px">${esc(dateLabel(x.date))}${x.rating ? ` · ${x.rating}/10` : ''}</b>${x.ate ? `<div class="mu">${esc(x.ate)}</div>` : ''}${x.notes ? `<div class="mu">${esc(x.notes)}</div>` : ''}</div><button class="chip" data-act="delvisit" data-id="${esc(x.id)}" aria-label="Delete visit">✕</button></div>`).join('')}${v.length > 8 ? `<p class="mu">And ${v.length - 8} earlier.</p>` : ''}</div>`;
+}
+function openRankings() {
+  const rows = S.restaurants.filter(r => !r.wishlist).map(r => ({ r, n: scoreOf(r.id), c: visitsOf(r.id).length })).filter(x => x.n);
+  const rank = (list, k) => [...list].sort((a, b) => b.n - a.n || b.c - a.c || a.r.name.localeCompare(b.r.name)).slice(0, k)
+    .map((x, i) => `<div class="shgrp" data-act="open" data-id="${esc(x.r.id)}" role="button" tabindex="0"><span><b>${i + 1}.</b> ${esc(x.r.name)}</span><span class="mu">${fmtScore(x.n)}/10 · ${x.c} visit${x.c > 1 ? 's' : ''}</span></div>`).join('');
+  const group = key => [...new Set(rows.map(x => x.r[key]).filter(Boolean))].sort().map(g => ({ g, list: rows.filter(x => x.r[key] === g) })).filter(x => x.list.length >= 2);
+  const most = [...S.restaurants].filter(r => !r.wishlist && r.visits).sort((a, b) => b.visits - a.visits || a.name.localeCompare(b.name)).slice(0, 5);
+  openSheet(`<h2>Rankings</h2>${rows.length ? `<h3 class="grouphd">Top rated</h3>${rank(rows, 10)}
+    ${group('city').map(x => `<h3 class="grouphd">Best in ${esc(x.g)}</h3>${rank(x.list, 3)}`).join('')}
+    ${group('cuisine').map(x => `<h3 class="grouphd">Best ${esc(x.g)}</h3>${rank(x.list, 3)}`).join('')}` : '<p class="muted">Log a few visits with a score and your rankings appear here.</p>'}
+    ${most.length ? `<h3 class="grouphd">Most visited</h3>${most.map((r, i) => `<div class="shgrp" data-act="open" data-id="${esc(r.id)}" role="button" tabindex="0"><span><b>${i + 1}.</b> ${esc(r.name)}</span><span class="mu">${r.visits} visit${r.visits > 1 ? 's' : ''}</span></div>`).join('')}` : ''}
+    <div class="actions"><button class="btn wide" data-act="close">Close</button></div>`);
 }
 
 /* ---------- booking flow ---------- */
@@ -551,7 +616,7 @@ function settingsHtml() {
       <p class="muted" style="margin-top:0">Mesa never asks for or stores card numbers. When a restaurant wants a card, you type it on their own booking page, ideally a one-time Revolut card. Mesa only records <i>whether</i> a card was needed.</p></div>
     <div class="card"><h3>Demo</h3>
       <div class="actions">${S.demo ? '<button class="btn wide" data-act="demo-off">Remove demo data</button>' : '<button class="btn wide" data-act="demo-on">Load demo data</button>'}</div></div>
-    <p class="mu" style="text-align:center">Mesa · build 2026-11-05.3</p></div>`;
+    <p class="mu" style="text-align:center">Mesa · build 2026-11-05.4</p></div>`;
 }
 async function checkConn() {
   const out = $('checkOut'); out.innerHTML = '<div class="okbox">Checking…</div>';
@@ -612,11 +677,12 @@ const ACT = {
   ready: () => { readyOnly = !readyOnly; render(); },
   wish: () => { wishOnly = !wishOnly; render(); },
   wstatus: el => { upd(el.dataset.id, { wishlist: el.dataset.v }); openRestaurant(el.dataset.id); render(); },
-  been: el => {
-    const id = el.dataset.id, r = find(id); if (!r) return;
-    upd(id, { wishlist: '', visits: Math.max(1, r.visits || 0), lastVisit: today() }); closeSheet(); render();
-    toast('Moved to your places. Make it a favourite?', '★ Favourite', () => { upd(id, { favourite: true }); render(); });
-  },
+  been: el => openVisit(el.dataset.id),
+  visit: el => openVisit(el.dataset.id),
+  score: el => { visitScore = visitScore === +el.dataset.v ? 0 : +el.dataset.v; document.querySelectorAll('#vScore .chip').forEach(c => c.classList.toggle('on', +c.dataset.v === visitScore)); },
+  savevisit: el => saveVisit(el.dataset.id),
+  delvisit: el => deleteVisit(el.dataset.id),
+  rankings: () => openRankings(),
   remove: async el => {
     const id = el.dataset.id, r = find(id); if (!r) return;
     const real = connected() && /^[0-9a-f-]{32,36}$/i.test(id);
@@ -666,9 +732,8 @@ const ACT = {
   saveedit: el => saveEdit(el.dataset.id),
   went: el => {
     const b = S.bookings.find(x => x.id === el.dataset.id), r = b && find(b.rid); if (!b) return;
-    b.status = 'went'; save();
-    if (r) upd(r.id, { visits: (r.visits || 0) + 1, lastVisit: b.date, ...(r.wishlist ? { wishlist: '' } : {}) });
-    render(); toast('Nice. Saved as a visit.');
+    b.status = 'went'; save(); render();
+    if (r) openVisit(r.id, { date: b.date });
   },
   cancel: el => {
     const b = S.bookings.find(x => x.id === el.dataset.id); if (!b) return;
