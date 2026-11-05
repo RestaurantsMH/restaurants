@@ -628,7 +628,7 @@ function settingsHtml() {
       <p class="muted" style="margin-top:0">Mesa never asks for or stores card numbers. When a restaurant wants a card, you type it on their own booking page, ideally a one-time Revolut card. Mesa only records <i>whether</i> a card was needed.</p></div>
     <div class="card"><h3>Demo</h3>
       <div class="actions">${S.demo ? '<button class="btn wide" data-act="demo-off">Remove demo data</button>' : '<button class="btn wide" data-act="demo-on">Load demo data</button>'}</div></div>
-    <p class="mu" style="text-align:center">Mesa · build 2026-11-05.6</p></div>`;
+    <p class="mu" style="text-align:center">Mesa · build 2026-11-05.7</p></div>`;
 }
 async function checkConn() {
   const out = $('checkOut'); out.innerHTML = '<div class="okbox">Checking…</div>';
@@ -738,7 +738,17 @@ const ACT = {
     render();
   },
   edit: el => openEdit(el.dataset.id),
-  add: () => openEdit(''),
+  add: () => (connected() && !S.demo ? openQuickAdd() : openEdit('')),
+  addfull: () => openEdit(''),
+  quickadd: async () => {
+    const text = $('qaText').value.trim();
+    if (!text) { toast('Type a name or paste a link first.'); return; }
+    try {
+      const r = await post('/api/restaurants/share', { text });
+      closeSheet(); await loadList(true);
+      toast(r.existing ? `${r.restaurant.name} is already in your list` : `Added ${r.restaurant.name} to 🔖 To try`, 'Open', () => openRestaurant(r.restaurant.id));
+    } catch (e) { toast('Could not add it: ' + e.message); }
+  },
   saveedit: el => saveEdit(el.dataset.id),
   went: el => {
     const b = S.bookings.find(x => x.id === el.dataset.id), r = b && find(b.rid); if (!b) return;
@@ -773,6 +783,13 @@ document.addEventListener('keydown', e => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.rc')) { e.preventDefault(); openRestaurant(e.target.dataset.id); }
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && connected() && Date.now() - S.at > 5 * 60e3) loadList(true); });
+
+function openQuickAdd() {
+  openSheet(`<h2>Add a place</h2><p class="muted">Type the name, or paste a Google Maps link or the restaurant’s website. It goes to 🔖 To try, and Mesa finds the booking details within a couple of hours.</p>
+    <input class="field" id="qaText" placeholder="Name, Google link or website" autocomplete="off" autocapitalize="words">
+    <div class="actions"><button class="btn go" data-act="quickadd">Add to To try</button><button class="btn" data-act="addfull">Fill in details myself</button><button class="btn wide" data-act="close">Cancel</button></div>`);
+  setTimeout(() => { const el = $('qaText'); if (el) el.focus(); }, 50);
+}
 
 /* ---------- add a place shared from Google Maps (Android share sheet; iPhone uses a Shortcut) ---------- */
 async function handleShare() {
