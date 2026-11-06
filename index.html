@@ -225,6 +225,8 @@ const cardBadge = r => r.card === 'No' ? '<span class="badge ok">No card</span>'
   : r.card === 'Yes - guarantee' ? '<span class="badge warn">💳 Card holds table</span>'
   : r.card === 'Yes - deposit' ? '<span class="badge warn">💳 Deposit</span>' : '<span class="badge">Card: ?</span>';
 const wishBadge = r => r.wishlist ? `<span class="badge wish">🔖 ${r.wishlist === 'Booked' ? 'Booked, not been yet' : 'Not been yet'}</span>` : '';
+const autoBadge = r => r.autoBooking === 'Books automatically' ? '<span class="badge ok">✓ Auto-book</span>' : r.autoBooking === 'Captcha or block' ? '<span class="badge warn">Captcha</span>' : '';
+const autoNote = r => r.autoBooking ? `<div class="note ${r.autoBooking === 'Books automatically' ? '' : 'warn'}"><b>Auto booking: ${esc(r.autoBooking)}.</b>${r.autoNotes ? ` ${esc(r.autoNotes)}` : ''}</div>` : '';
 const methodBadge = r => r.method && r.method !== 'Unknown' ? `<span class="badge acc">${esc(r.method)}</span>` : '<span class="badge">Method: ?</span>';
 
 function visible() {
@@ -240,7 +242,7 @@ function cardHtml(r) {
   return `<div class="rc ${r.wishlist ? 'wish' : ''}" role="button" tabindex="0" data-act="open" data-id="${esc(r.id)}"><div class="top"><div class="nm"><b>${esc(r.name)}</b><span>${esc(sub || r.city)}</span></div>
     ${r.wishlist ? '' : `<button class="star ${r.favourite ? 'on' : ''}" data-act="star" data-id="${esc(r.id)}" aria-label="Favourite">★</button>`}</div>
     ${r.wishlist && r.why ? `<span class="mu" style="display:block;margin-top:4px">${esc(r.why)}</span>` : ''}
-    <div class="badges">${wishBadge(r)}${methodBadge(r)}${cardBadge(r)}${scoreBadge(r)}${r.visits ? `<span class="badge">${r.visits} visit${r.visits > 1 ? 's' : ''}</span>` : ''}</div>
+    <div class="badges">${wishBadge(r)}${methodBadge(r)}${autoBadge(r)}${cardBadge(r)}${scoreBadge(r)}${r.visits ? `<span class="badge">${r.visits} visit${r.visits > 1 ? 's' : ''}</span>` : ''}</div>
     ${(r.tags || []).length ? `<div class="badges" style="margin-top:6px">${r.tags.map(t => `<span class="badge tag">${esc(t)}</span>`).join('')}</div>` : ''}</div>`;
 }
 function renderList() {
@@ -296,10 +298,11 @@ function openRestaurant(id) {
   const link = safeUrl(r.bookingLink), web = safeUrl(r.website);
   openSheet(`<div class="hd" style="margin:0 0 4px"><div><h2>${esc(r.name)}</h2><div class="mu">${esc([r.area, r.cuisine, r.city, r.price].filter(Boolean).join(' · '))}</div></div>
       ${r.wishlist ? '' : `<button class="star ${r.favourite ? 'on' : ''}" data-act="star" data-id="${esc(id)}" data-sheet="1" aria-label="Favourite">★</button>`}</div>
-    <div class="badges">${wishBadge(r)}${methodBadge(r)}${cardBadge(r)}${(r.meals || []).map(m => `<span class="badge">${esc(m)}</span>`).join('')}${(r.tags || []).map(t => `<span class="badge tag">${esc(t)}</span>`).join('')}</div>
+    <div class="badges">${wishBadge(r)}${methodBadge(r)}${autoBadge(r)}${cardBadge(r)}${(r.meals || []).map(m => `<span class="badge">${esc(m)}</span>`).join('')}${(r.tags || []).map(t => `<span class="badge tag">${esc(t)}</span>`).join('')}</div>
     ${r.wishlist ? `<div class="note warn">You have not been here yet${r.added ? ` · added ${esc(dateLabel(r.added))}` : ''}.${r.why ? `<br>${esc(r.why)}` : ''}</div>
       <div class="seg">${['Want to try', 'Booked'].map(w => `<button class="${r.wishlist === w ? 'on' : ''}" data-act="wstatus" data-id="${esc(id)}" data-v="${w}">${w}</button>`).join('')}</div>` : ''}
     ${cardNote(r)}
+    ${autoNote(r)}
     ${r.notes ? `<div class="note">${esc(r.notes)}</div>` : ''}
     ${ratingHtml(r)}
     ${visitsHtml(r)}
@@ -418,6 +421,13 @@ function bookText(r, d) {
     ? `Guten Tag, ich würde gerne einen Tisch für ${d.party} Person${d.party > 1 ? 'en' : ''} am ${day} um ${d.time} Uhr reservieren, auf den Namen ${name}.${note} Haben Sie Platz? Brauchen Sie zur Bestätigung eine Kreditkarte oder eine Anzahlung? Danke!`
     : `Hola, me gustaría reservar una mesa para ${d.party} el ${day} a las ${d.time}, a nombre de ${name}.${note} ¿Tenéis disponibilidad? Si hace falta tarjeta o depósito para confirmar, ¿me podéis decir cómo? Gracias.`;
 }
+// A message to paste or send to Instinct (the WhatsApp assistant) so it books for you.
+function instinctText(r, d) {
+  const day = parseYmd(d.date).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+  const who = [S.settings.name, S.settings.email, S.settings.phone].filter(Boolean).join(', ');
+  const link = safeUrl(r.bookingLink) || safeUrl(r.website);
+  return `Please book a table for ${d.party} at ${r.name}${r.area || r.city ? ` (${[r.area, r.city].filter(Boolean).join(', ')})` : ''} on ${day} at ${d.time}.${who ? ` Booking under: ${who}.` : ''}${link ? ` Booking page: ${link}` : ''} If it asks for a card or a deposit, tell me before you book. If that time is not free, tell me the nearest options and do not book.${d.note ? ` Note for the restaurant: ${d.note}` : ''}`;
+}
 function readBook() {
   return { date: $('bkDate').value, time: $('bkTime').value, party: Math.max(1, Math.min(20, parseInt($('bkParty').dataset.v, 10) || 2)), note: $('bkNote').value.trim().slice(0, 200) };
 }
@@ -437,6 +447,10 @@ function bookingUrl(r, d) {
     return { url: u.href, carries: 'the date, time and number of people' };
   }
   if (host.endsWith('.myrestoo.net')) {
+    if (r.autoBooking === 'Books automatically' && d.time) {
+      const q = new URLSearchParams({ update_booking_id: '', status_id: '1', pax: String(d.party), pax_children: '0', date: d.date, time: `${d.time}:00`, experience_id: '', experience_tickets: '', area_id: '', button_pax: String(d.party), input_party_size: '7', button_date: d.date, 'booking-date': '', 'booking-date_submit': '' });
+      return { url: `${u.origin}/es/reservar/seleccionar-horario?${q}`, carries: 'the date, time and number of people' };
+    }
     if (u.pathname === '/') u.pathname = '/es/reservar';
     if (/\/reservar\/?$/.test(u.pathname)) { u.searchParams.set('date', d.date); return { url: u.href, carries: 'the date' }; }
   }
@@ -468,6 +482,7 @@ function openBook(id, keep) {
       ${link ? `<button class="btn go wide" data-act="openpage" data-id="${esc(id)}">Open booking page ↗</button><div class="mu wide" id="bkCarry"></div>` : `<div class="note wide">No booking page saved yet. Use WhatsApp or call, or add the link under “Edit details”.</div>`}
       ${r.whatsapp ? `<button class="btn" data-act="wa" data-id="${esc(id)}">WhatsApp</button>` : ''}
       ${r.phone ? `<a class="btn" href="tel:${esc(telDigits(r.phone))}">Call</a>` : ''}
+      <button class="btn" data-act="instinct" data-id="${esc(id)}">Ask Instinct</button>
       <button class="btn" data-act="copymsg">Copy message</button>
       <button class="btn wide" data-act="booked" data-id="${esc(id)}">✓ I booked it</button></div>
     <p class="mu">Book on the restaurant’s own page or by message. Then tap “I booked it” to save it to your calendar.</p>`);
@@ -660,9 +675,12 @@ function settingsHtml() {
       <div id="checkOut"></div>
       ${st.list ? `<div class="${st.list.ok ? 'okbox' : 'errbox'}"><b>Restaurants</b> ${fmtAt(st.list.at)}: ${st.list.ok ? 'OK' : esc(st.list.message)}</div>` : ''}</div>
     <div class="card"><h3>Your booking details</h3>
-      <p class="muted" style="margin-top:0">Used in the message you send to a restaurant. Stays on this phone.</p>
-      <label class="lbl" for="myName">Name for reservations</label><input class="field" id="myName" value="${esc(S.settings.name)}" placeholder="Matthias" autocomplete="off">
-      <div class="actions"><button class="btn" data-act="savename">Save name</button></div></div>
+      <p class="muted" style="margin-top:0">Used in the messages Mesa writes for restaurants and for Instinct. Stays on this phone. Never put a card number here.</p>
+      <label class="lbl" for="myName">Name for reservations</label><input class="field" id="myName" value="${esc(S.settings.name)}" placeholder="Your name" autocomplete="off">
+      <label class="lbl" for="myEmail">Email</label><input class="field" id="myEmail" type="email" value="${esc(S.settings.email || '')}" placeholder="you@example.com" autocomplete="off" autocapitalize="off">
+      <label class="lbl" for="myPhone">Phone</label><input class="field" id="myPhone" type="tel" value="${esc(S.settings.phone || '')}" placeholder="+34 600 000 000" autocomplete="off">
+      <label class="lbl" for="myInstinct">Instinct's WhatsApp number (optional)</label><input class="field" id="myInstinct" type="tel" value="${esc(S.settings.instinct || '')}" placeholder="With country code, so Ask Instinct opens its chat" autocomplete="off">
+      <div class="actions"><button class="btn" data-act="savename">Save details</button></div></div>
     <div class="card"><h3>New phone?</h3>
       <p class="muted" style="margin-top:0">Your places, visits and scores live in Notion, so they come back on their own. Only this connection stays on the phone. Copy the setup code here, install Mesa on the new phone, and paste the code there.</p>
       <div class="actions"><button class="btn" data-act="copycode">Copy setup code</button></div>
@@ -675,7 +693,7 @@ function settingsHtml() {
       <p class="muted" style="margin-top:0">Mesa never asks for or stores card numbers. When a restaurant wants a card, you type it on their own booking page, ideally a one-time Revolut card. Mesa only records <i>whether</i> a card was needed.</p></div>
     <div class="card"><h3>Demo</h3>
       <div class="actions">${S.demo ? '<button class="btn wide" data-act="demo-off">Remove demo data</button>' : '<button class="btn wide" data-act="demo-on">Load demo data</button>'}</div></div>
-    <p class="mu" style="text-align:center">Mesa · build 2026-11-05.11</p></div>`;
+    <p class="mu" style="text-align:center">Mesa · build 2026-11-06.12</p></div>`;
 }
 async function checkConn() {
   const out = $('checkOut'); out.innerHTML = '<div class="okbox">Checking…</div>';
@@ -783,6 +801,11 @@ const ACT = {
   openpage: el => { const r = find(el.dataset.id); const u = bookingUrl(r, readBook()).url; if (u) window.open(u, '_blank', 'noopener'); },
   wa: el => { const r = find(el.dataset.id); window.open(`https://wa.me/${waDigits(r.whatsapp)}?text=${encodeURIComponent(bookText(r, readBook()))}`, '_blank', 'noopener'); },
   copymsg: () => copyText($('bkMsg').textContent),
+  instinct: el => {
+    const r = find(el.dataset.id), d = readBook(); if (!r || !d.date || !d.time) { toast('Pick a date and time first.'); return; }
+    const num = String(S.settings.instinct || '').replace(/\D/g, ''), text = instinctText(r, d);
+    window.open(`https://wa.me/${num}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+  },
   booked: el => confirmBooked(el.dataset.id),
   card: el => {
     const r = find(el.dataset.id), v = el.dataset.v; closeSheet();
@@ -816,15 +839,15 @@ const ACT = {
   },
   saveconn: () => { S.settings.baseUrl = $('baseUrl').value.trim(); S.settings.appKey = $('appKey').value.trim(); save(); toast('Saved'); loadList(); },
   check: async () => { S.settings.baseUrl = $('baseUrl').value.trim(); S.settings.appKey = $('appKey').value.trim(); save(); await checkConn(); },
-  copycode: () => { const j = JSON.stringify({ u: S.settings.baseUrl, k: S.settings.appKey, n: S.settings.name, p: S.settings.phone }); copyText('mesa1.' + btoa(unescape(encodeURIComponent(j)))); },
+  copycode: () => { const j = JSON.stringify({ u: S.settings.baseUrl, k: S.settings.appKey, n: S.settings.name, p: S.settings.phone, e: S.settings.email, i: S.settings.instinct }); copyText('mesa1.' + btoa(unescape(encodeURIComponent(j)))); },
   restorecode: () => {
     const raw = $('setupCode').value.trim();
     let o; try { o = JSON.parse(decodeURIComponent(escape(atob(raw.replace(/^mesa1\./, ''))))); } catch { toast('That code does not look right. Copy it again on the old phone.'); return; }
     if (!o || typeof o.u !== 'string' || !/^https:\/\//.test(o.u) || typeof o.k !== 'string' || !o.k) { toast('That code does not look right. Copy it again on the old phone.'); return; }
-    S.settings.baseUrl = o.u; S.settings.appKey = o.k; if (o.n) S.settings.name = String(o.n).slice(0, 60); if (o.p) S.settings.phone = String(o.p).slice(0, 40);
+    S.settings.baseUrl = o.u; S.settings.appKey = o.k; if (o.n) S.settings.name = String(o.n).slice(0, 60); if (o.p) S.settings.phone = String(o.p).slice(0, 40); if (o.e) S.settings.email = String(o.e).slice(0, 80); if (o.i) S.settings.instinct = String(o.i).slice(0, 30);
     S.rescanned = false; save(); toast('Connected. Loading your places…'); loadList();
   },
-  savename: () => { S.settings.name = $('myName').value.trim().slice(0, 60); save(); toast('Saved'); },
+  savename: () => { S.settings.name = $('myName').value.trim().slice(0, 60); S.settings.email = $('myEmail').value.trim().slice(0, 80); S.settings.phone = $('myPhone').value.trim().slice(0, 40); S.settings.instinct = $('myInstinct').value.trim().slice(0, 30); save(); toast('Saved'); },
   theme: el => { S.settings.theme = el.dataset.v; save(); render(); },
   'demo-on': () => { S.demo = true; S.restaurants = JSON.parse(JSON.stringify(DEMO)); for (const r of S.restaurants) r.tags = DEMO_TAGS[r.name] || []; save(); view = 'places'; render(); },
   'demo-off': () => { S.demo = false; S.restaurants = []; S.bookings = S.bookings.filter(b => !b.rid.startsWith('demo')); save(); render(); loadList(); },
