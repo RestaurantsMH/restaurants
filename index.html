@@ -157,7 +157,7 @@ const MEALS = ['Lunch', 'Dinner', 'Brunch'];
 const TAGS = ['Terrace', 'Sea view', 'Group-friendly', 'Kids welcome', 'Romantic', 'Special occasion', 'Casual', 'Fine dining', 'Vegetarian options', 'Dog-friendly', 'Quiet', 'Lively'];
 
 /* ---------- state ---------- */
-function blank() { return { restaurants: [], visits: [], at: 0, bookings: [], settings: { baseUrl: '', appKey: '', theme: 'dark', name: '', phone: '', share: { lang: 'en', web: true, map: true, phone: false, notes: false } }, status: {}, demo: false }; }
+function blank() { return { restaurants: [], visits: [], at: 0, bookings: [], requests: [], settings: { baseUrl: '', appKey: '', theme: 'dark', name: '', phone: '', share: { lang: 'en', web: true, map: true, phone: false, notes: false } }, status: {}, demo: false }; }
 function load() {
   try { const o = JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); const s = Object.assign(blank(), o); s.settings = Object.assign(blank().settings, o.settings); return s; }
   catch { return blank(); }
@@ -276,6 +276,7 @@ function bookingsHtml() {
   const row = (b, btns) => `<div class="bk"><div><b>${esc(b.name)}</b><div class="when">${esc(dateLabel(b.date))} · ${esc(b.time)} · ${b.party} ${b.party > 1 ? 'people' : 'person'}</div></div><div class="chips">${btns}</div></div>`;
   return `<div class="hd"><h1>Bookings</h1></div><div class="stack">
     ${ask.length ? `<div class="card"><h3>Did you go?</h3>${ask.map(b => row(b, `<button class="chip" data-act="went" data-id="${b.id}">Yes ✓</button><button class="chip" data-act="cancel" data-id="${b.id}">No</button>`)).join('')}</div>` : ''}
+    ${reqs().length ? `<div class="card"><h3>Requests</h3>${reqs().slice(0, 5).map(x => `<div class="bk"><div><b>${esc(x.name)}</b><div class="when">${esc(dateLabel(x.date))} · ${esc(x.time)} · ${x.party} · ${x.kind === 'Book' ? 'booking' : 'checking'} · ${esc(x.status.toLowerCase())}</div></div><div class="chips"><button class="chip" data-act="openreq" data-id="${esc(x.id)}">Open</button></div></div>`).join('')}</div>` : ''}
     <div class="card"><h3>Upcoming</h3>${up.length ? up.map(b => row(b, `<button class="chip" data-act="open" data-id="${esc(b.rid)}">Details</button><button class="chip" data-act="cancel" data-id="${b.id}">Cancel</button>`)).join('') : '<p class="empty">No bookings yet. Open a restaurant and tap “Book a table”.</p>'}</div>
     ${hist.length ? `<div class="card"><h3>Been there</h3>${hist.map(b => row(b, '')).join('')}</div>` : ''}
     <p class="mu">Bookings are kept on this phone. “I booked it” also puts the table in your Google Calendar. Cancelling here does not delete the calendar event.</p></div>`;
@@ -286,7 +287,8 @@ function openSheet(html) {
   $('overlay').innerHTML = `<div class="scrim" id="scrim"><div class="sheet" role="dialog">${html}</div></div>`;
   $('scrim').onclick = e => { if (e.target.id === 'scrim') closeSheet(); };
 }
-function closeSheet() { $('overlay').innerHTML = ''; }
+let reqOpen = '';
+function closeSheet() { reqOpen = ''; $('overlay').innerHTML = ''; }
 
 function cardNote(r) {
   if (r.card === 'No') return '<div class="note ok">No card needed here, as far as you have found.</div>';
@@ -412,6 +414,67 @@ function openRankings() {
     <div class="actions"><button class="btn wide" data-act="close">Close</button></div>`);
 }
 
+/* ---------- booking requests: Mesa -> Notion queue -> the Mac task ---------- */
+const reqs = () => (S.requests = S.requests || []);
+const REQ_ACTIVE = ['Pending', 'Working'];
+const canBookForMe = r => connected() && r.autoBooking === 'Books automatically';
+async function bookForMe(id) {
+  const r = find(id), d = readBook();
+  if (!r || !d.date || !d.time) { toast('Pick a date and time first.'); return; }
+  const guest = { name: S.settings.name, email: S.settings.email, phone: S.settings.phone };
+  if (!guest.name || !guest.email || !guest.phone) { toast('Add your name, email and phone under Settings first.'); return; }
+  try {
+    const out = await post('/api/bookreq/add', { restaurantId: id, date: d.date, time: d.time, people: d.party, note: d.note, guest });
+    const q = out.request;
+    if (!reqs().some(x => x.id === q.id)) reqs().unshift({ id: q.id, rid: id, name: r.name, date: q.date, time: q.time, party: q.people, kind: q.kind, status: q.status, result: q.result, at: Date.now() });
+    S.requests = reqs().slice(0, 20); save(); render(); openRequest(q.id); startPolling();
+  } catch (e) { toast(e.message); }
+}
+function openRequest(qid) {
+  const q = reqs().find(x => x.id === qid); if (!q) return;
+  reqOpen = qid;
+  const r = find(q.rid), book = q.kind === 'Book', active = REQ_ACTIVE.includes(q.status);
+  const when = `${dateLabel(q.date)} · ${q.time} · ${q.party} ${q.party > 1 ? 'people' : 'person'}`;
+  const body = q.status === 'Pending' ? '<p class="muted">Request sent. The Mac picks it up within a few minutes, if it is on and Claude is open.</p>'
+    : q.status === 'Working' ? '<p class="muted">The Mac is working on it now…</p>'
+    : q.status === 'Done' ? (book ? `<div class="okbox"><b>Booked ✓</b> ${esc(q.result)}</div><p class="mu">The confirmation email will show up under Bookings and in your calendar.</p>` : `<div class="note">${esc(q.result)}</div>`)
+    : q.status === 'Failed' ? `<div class="errbox"><b>It did not work.</b> ${esc(q.result || 'No reason given.')}</div>`
+    : '<p class="muted">Request cancelled.</p>';
+  openSheet(`<h2>${book ? 'Booking' : 'Checking'} ${esc(q.name)}</h2><div class="mu">${esc(when)}</div>${body}
+    <div class="actions">
+      ${q.status === 'Pending' ? `<button class="btn" data-act="cancelreq" data-id="${esc(q.id)}">Cancel request</button>` : ''}
+      ${r ? `<button class="btn ${q.status === 'Failed' ? 'go' : ''}" data-act="instinctreq" data-id="${esc(q.id)}">Ask Instinct</button><button class="btn" data-act="openreqpage" data-id="${esc(q.id)}">Open booking page ↗</button>` : ''}
+      <button class="btn wide" data-act="close">Close</button></div>
+    ${active ? '<p class="mu">Taking too long? Tap Ask Instinct. A request that is still waiting is cancelled first, so it is not booked twice.</p>' : ''}`);
+}
+async function cancelRequest(qid) {
+  const q = reqs().find(x => x.id === qid); if (!q) return false;
+  try { const out = await post('/api/bookreq/cancel', { id: qid }); q.status = out.request.status; q.result = out.request.result; save(); render(); return out.cancelled; }
+  catch (e) { toast('Could not cancel: ' + e.message); return false; }
+}
+let pollTimer = 0;
+async function pollRequests() {
+  const act = reqs().filter(x => REQ_ACTIVE.includes(x.status) && Date.now() - x.at < 3 * 3600e3);
+  if (!act.length || !connected()) return false;
+  try {
+    const out = await post('/api/bookreq/status', { ids: act.map(x => x.id).slice(0, 10) });
+    let changed = false;
+    for (const n of out.requests) {
+      const x = reqs().find(y => y.id === n.id);
+      if (!x || (x.status === n.status && x.result === n.result)) continue;
+      x.status = n.status; x.result = n.result; changed = true;
+      if (n.status === 'Done' && x.kind === 'Book') { toast(`Booked ${x.name} ✓`, 'Open', () => openRequest(x.id)); setTimeout(() => scanBookings(), 45000); setTimeout(() => scanBookings(), 150000); }
+      else if (n.status === 'Failed') toast(`${x.name}: it did not work`, 'Open', () => openRequest(x.id));
+    }
+    if (changed) { save(); render(); if (reqOpen) openRequest(reqOpen); }
+  } catch { /* try again on the next tick */ }
+  return true;
+}
+function startPolling() {
+  if (!pollTimer) pollTimer = setInterval(async () => { if (!(await pollRequests())) { clearInterval(pollTimer); pollTimer = 0; } }, 20000);
+  pollRequests();
+}
+
 /* ---------- booking flow ---------- */
 function bookText(r, d) {
   const name = S.settings.name || 'Matthias', lang = r.city === 'Vienna' ? 'de' : 'es';
@@ -479,7 +542,8 @@ function openBook(id, keep) {
     <label class="lbl" for="bkNote">Note for the restaurant (optional)</label><input class="field" id="bkNote" maxlength="200" placeholder="Allergies, birthday, high chair…" value="${esc(d.note)}">
     <span class="lbl">Message to send</span><div class="msg" id="bkMsg"></div>
     <div class="actions">
-      ${link ? `<button class="btn go wide" data-act="openpage" data-id="${esc(id)}">Open booking page ↗</button><div class="mu wide" id="bkCarry"></div>` : `<div class="note wide">No booking page saved yet. Use WhatsApp or call, or add the link under “Edit details”.</div>`}
+      ${canBookForMe(r) ? `<button class="btn go wide" data-act="bookforme" data-id="${esc(id)}">${r.method === 'TheFork' ? 'Book for me' : 'Check tables for me'}</button>` : ''}
+      ${link ? `<button class="btn ${canBookForMe(r) ? '' : 'go'} wide" data-act="openpage" data-id="${esc(id)}">Open booking page ↗</button><div class="mu wide" id="bkCarry"></div>` : `<div class="note wide">No booking page saved yet. Use WhatsApp or call, or add the link under “Edit details”.</div>`}
       ${r.whatsapp ? `<button class="btn" data-act="wa" data-id="${esc(id)}">WhatsApp</button>` : ''}
       ${r.phone ? `<a class="btn" href="tel:${esc(telDigits(r.phone))}">Call</a>` : ''}
       <button class="btn" data-act="instinct" data-id="${esc(id)}">Ask Instinct</button>
@@ -693,7 +757,7 @@ function settingsHtml() {
       <p class="muted" style="margin-top:0">Mesa never asks for or stores card numbers. When a restaurant wants a card, you type it on their own booking page, ideally a one-time Revolut card. Mesa only records <i>whether</i> a card was needed.</p></div>
     <div class="card"><h3>Demo</h3>
       <div class="actions">${S.demo ? '<button class="btn wide" data-act="demo-off">Remove demo data</button>' : '<button class="btn wide" data-act="demo-on">Load demo data</button>'}</div></div>
-    <p class="mu" style="text-align:center">Mesa · build 2026-11-06.12</p></div>`;
+    <p class="mu" style="text-align:center">Mesa · build 2026-11-06.13</p></div>`;
 }
 async function checkConn() {
   const out = $('checkOut'); out.innerHTML = '<div class="okbox">Checking…</div>';
@@ -801,6 +865,17 @@ const ACT = {
   openpage: el => { const r = find(el.dataset.id); const u = bookingUrl(r, readBook()).url; if (u) window.open(u, '_blank', 'noopener'); },
   wa: el => { const r = find(el.dataset.id); window.open(`https://wa.me/${waDigits(r.whatsapp)}?text=${encodeURIComponent(bookText(r, readBook()))}`, '_blank', 'noopener'); },
   copymsg: () => copyText($('bkMsg').textContent),
+  bookforme: el => bookForMe(el.dataset.id),
+  openreq: el => openRequest(el.dataset.id),
+  cancelreq: async el => { const ok = await cancelRequest(el.dataset.id); toast(ok ? 'Request cancelled' : 'It was already picked up.'); openRequest(el.dataset.id); },
+  openreqpage: el => { const q = reqs().find(x => x.id === el.dataset.id), r = q && find(q.rid); const u = r && bookingUrl(r, { date: q.date, time: q.time, party: q.party }).url; if (u) window.open(u, '_blank', 'noopener'); },
+  instinctreq: async el => {
+    const q = reqs().find(x => x.id === el.dataset.id), r = q && find(q.rid); if (!q || !r) return;
+    if (q.status === 'Working') { toast('The Mac is working on it right now. Wait for the result first.'); return; }
+    if (q.status === 'Pending' && !(await cancelRequest(q.id))) { toast('The Mac just picked it up. Wait for the result.'); openRequest(q.id); return; }
+    const num = String(S.settings.instinct || '').replace(/\D/g, ''), text = instinctText(r, { date: q.date, time: q.time, party: q.party, note: '' });
+    window.open(`https://wa.me/${num}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+  },
   instinct: el => {
     const r = find(el.dataset.id), d = readBook(); if (!r || !d.date || !d.time) { toast('Pick a date and time first.'); return; }
     const num = String(S.settings.instinct || '').replace(/\D/g, ''), text = instinctText(r, d);
@@ -866,7 +941,7 @@ document.addEventListener('change', e => {
 document.addEventListener('keydown', e => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.rc')) { e.preventDefault(); openRestaurant(e.target.dataset.id); }
 });
-document.addEventListener('visibilitychange', () => { if (!document.hidden && connected() && Date.now() - S.at > 5 * 60e3) loadList(true); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) return; startPolling(); if (connected() && Date.now() - S.at > 5 * 60e3) loadList(true); });
 
 function openQuickAdd() {
   openSheet(`<h2>Add a place</h2><p class="muted">Type the name, or paste a Google Maps link or the restaurant’s website. It goes to 🔖 To try, and Mesa finds the booking details within a couple of hours.</p>
@@ -891,6 +966,7 @@ async function handleShare() {
 
 render();
 loadList(true);
+startPolling();
 handleShare();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
