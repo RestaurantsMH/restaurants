@@ -68,6 +68,13 @@ a { color: var(--acc); }
 .badge { border-radius: 8px; padding: 2px 8px; font-size: 12px; background: var(--soft); color: var(--muted); }
 .badge.ok { background: var(--good-soft); color: var(--good); }
 .badge.warn { background: var(--warn-soft); color: var(--warn); }
+.info { padding: 4px 14px; margin: 10px 0; }
+.inf { display: flex; gap: 12px; justify-content: space-between; align-items: baseline; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.inf:last-of-type { border-bottom: 0; }
+.inf > span:first-child { flex: 0 0 104px; }
+.inf > span:last-child { text-align: right; min-width: 0; overflow-wrap: anywhere; }
+.inf a { color: var(--acc); }
+.okt { color: var(--good); } .warnt { color: var(--warn); }
 .badge.tag { background: none; border: 1px solid var(--line); }
 .badge.acc { background: var(--acc); color: var(--onacc); font-weight: 600; }
 .rc.wish { border-style: dashed; }
@@ -151,15 +158,17 @@ const dateLabel = (s, loc = 'en-GB') => parseYmd(s).toLocaleDateString(loc, { we
 const STORE_KEY = 'mesa.v1';
 const CITIES = ['Madrid', 'Costa Brava', 'Vienna'];
 const METHODS = ['CoverManager', 'Molzait', 'TheFork', 'Myrestoo', 'Agora POS', 'Own website', 'Phone', 'WhatsApp', 'Email', 'Walk-in', 'Unknown'];
-const CARDS = [['Unknown', 'Not known yet'], ['No', 'No card needed'], ['Yes - guarantee', 'Card holds the table'], ['Yes - deposit', 'Deposit / prepayment']];
+const CARDS = [['Unknown', 'Unknown'], ['No', 'No'], ['Yes', 'Yes']];
+const cardOf = r => r.cardStatus || (r.card === 'No' ? 'No' : !r.card || r.card === 'Unknown' ? 'Unknown' : 'Yes');
+const autoOf = r => r.autoBook !== undefined ? !!r.autoBook : ['Books automatically', 'Pre-submit verified (no card)'].includes(r.autoBooking);
 const PRICES = ['', '€', '€€', '€€€', '€€€€'];
 const MEALS = ['Lunch', 'Dinner', 'Brunch'];
 const TAGS = ['Terrace', 'Sea view', 'Group-friendly', 'Kids welcome', 'Romantic', 'Special occasion', 'Casual', 'Fine dining', 'Vegetarian options', 'Dog-friendly', 'Quiet', 'Lively'];
 
 /* ---------- state ---------- */
-function blank() { return { restaurants: [], visits: [], at: 0, bookings: [], requests: [], settings: { baseUrl: '', appKey: '', theme: 'dark', name: '', phone: '', share: { lang: 'en', web: true, map: true, phone: false, notes: false } }, status: {}, demo: false }; }
+function blank() { return { restaurants: [], visits: [], at: 0, bookings: [], requests: [], settings: { baseUrl: '', appKey: '', theme: 'dark', name: '', phone: '', share: { lang: 'en', web: true, map: true, phone: false, notes: true } }, status: {}, demo: false }; }
 function load() {
-  try { const o = JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); const s = Object.assign(blank(), o); s.settings = Object.assign(blank().settings, o.settings); return s; }
+  try { const o = JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); const s = Object.assign(blank(), o); s.settings = Object.assign(blank().settings, o.settings); if (s.settings.share && !s.settings.share.v2) { s.settings.share.notes = true; s.settings.share.v2 = true; } return s; }
   catch { return blank(); }
 }
 function save() {
@@ -169,7 +178,7 @@ function save() {
 let S = load();
 let view = 'places', city = 'All', q = '', groupBy = ['fav', 'rating', 'visits', 'wish'].includes(S.settings && S.settings.groupBy) ? S.settings.groupBy : '', favOnly = false, wishOnly = false, tagFilter = '', loading = false;
 favOnly = groupBy === 'fav'; wishOnly = groupBy === 'wish';
-const SHARE_DEFAULTS = { lang: 'en', web: true, map: true, phone: false, notes: false };
+const SHARE_DEFAULTS = { lang: 'en', web: true, map: true, phone: false, notes: true };
 
 function applyTheme() {
   const t = ['dark', 'light', 'auto'].includes(S.settings.theme) ? S.settings.theme : 'dark';
@@ -221,12 +230,9 @@ async function upd(id, fields) {
 }
 
 /* ---------- list ---------- */
-const cardBadge = r => r.card === 'No' ? '<span class="badge ok">No card</span>'
-  : r.card === 'Yes - guarantee' ? '<span class="badge warn">💳 Card holds table</span>'
-  : r.card === 'Yes - deposit' ? '<span class="badge warn">💳 Deposit</span>' : '<span class="badge">Card: ?</span>';
+const cardBadge = r => cardOf(r) === 'No' ? '<span class="badge ok">No card</span>' : cardOf(r) === 'Yes' ? '<span class="badge warn">💳 Card needed</span>' : '<span class="badge">Card: ?</span>';
 const wishBadge = r => r.wishlist ? `<span class="badge wish">🔖 ${r.wishlist === 'Booked' ? 'Booked, not been yet' : 'Not been yet'}</span>` : '';
-const autoBadge = r => r.autoBooking === 'Books automatically' ? '<span class="badge ok">✓ Auto-book</span>' : r.autoBooking === 'Captcha or block' ? '<span class="badge warn">Captcha</span>' : '';
-const autoNote = r => r.autoBooking ? `<div class="note ${r.autoBooking === 'Books automatically' ? '' : 'warn'}"><b>Auto booking: ${esc(r.autoBooking)}.</b>${r.autoNotes ? ` ${esc(r.autoNotes)}` : ''}</div>` : '';
+const autoBadge = r => autoOf(r) ? '<span class="badge ok">✓ Auto-book</span>' : '';
 const methodBadge = r => r.method && r.method !== 'Unknown' ? `<span class="badge acc">${esc(r.method)}</span>` : '<span class="badge">Method: ?</span>';
 
 function visible() {
@@ -291,10 +297,29 @@ let reqOpen = '';
 function closeSheet() { reqOpen = ''; $('overlay').innerHTML = ''; }
 
 function cardNote(r) {
-  if (r.card === 'No') return '<div class="note ok">No card needed here, as far as you have found.</div>';
-  if (r.card === 'Unknown') return '<div class="note">Card requirement not known yet. Mesa will ask after you book, so it is on record for next time.</div>';
-  return `<div class="note warn">💳 ${r.card === 'Yes - deposit' ? 'They take a deposit' : 'They hold the table with a card'}${r.policy ? `: ${esc(r.policy)}` : '.'}<br>Have a one-time Revolut card ready. Mesa never stores card numbers; you type them only on the restaurant’s own page.</div>`;
+  const c = cardOf(r);
+  if (c === 'No') return '<div class="note ok">Card required: No.</div>';
+  if (c === 'Unknown') return '<div class="note">Card required: Unknown. Mesa will ask after you book, so it is on record for next time.</div>';
+  return '<div class="note warn">Card required: Yes. Have a one-time card ready. Mesa never stores card numbers; you type them only on the restaurant’s own page.</div>';
 }
+const infoRow = (label, html) => `<div class="inf"><span class="mu">${label}</span><span>${html}</span></div>`;
+const yn = (v, yes, no) => v === 'Yes' ? `<b class="warnt">${yes}</b>` : v === 'No' ? `<b class="okt">${no}</b>` : '<span class="mu">Unknown</span>';
+function infoHtml(r) {
+  const add = `<button class="chip" data-act="edit" data-id="${esc(r.id)}">Add</button>`;
+  const web = safeUrl(r.website), maps = mapsUrl(r);
+  return `<div class="card info">
+    ${infoRow('Address', r.address ? `${esc(r.address)} <a href="${esc(maps)}" target="_blank" rel="noopener">Map ↗</a>` : `<span class="mu">—</span> ${add}`)}
+    ${infoRow('Phone', r.phone ? `<a href="tel:${esc(telDigits(r.phone))}">${esc(r.phone)}</a>` : `<span class="mu">—</span> ${add}`)}
+    ${infoRow('Opening hours', r.hours ? esc(r.hours).replace(/\n/g, '<br>') : `<span class="mu">—</span> ${add}`)}
+    ${web ? infoRow('Website', `<a href="${esc(web)}" target="_blank" rel="noopener">${esc(web.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''))} ↗</a>`) : ''}
+    ${infoRow('Card required', yn(cardOf(r), 'Yes', 'No'))}
+    ${infoRow('Auto booking', autoOf(r) ? '<b class="okt">Yes</b>' : '<b>No</b>')}
+    ${r.method && r.method !== 'Unknown' ? infoRow('Booked via', esc(r.method)) : ''}
+    ${cardOf(r) === 'Yes' ? '<p class="mu" style="margin:6px 0 0">Have a one-time card ready. Mesa never stores card numbers; you type them only on the restaurant’s own page.</p>' : ''}</div>`;
+}
+const myNotesHtml = r => `<div style="margin:10px 0"><label class="lbl" for="myNotesBox">My notes</label>
+  <textarea class="field" id="myNotesBox" data-mynotes="${esc(r.id)}" rows="3" placeholder="What to order, where to sit, who to ask for…">${esc(r.myNotes || '')}</textarea>
+  <p class="mu" style="margin:4px 0 0" id="myNotesHint">Saved when you tap away. Shared when you recommend this place.</p></div>`;
 function openRestaurant(id) {
   const r = find(id); if (!r) return;
   const link = safeUrl(r.bookingLink), web = safeUrl(r.website);
@@ -303,9 +328,8 @@ function openRestaurant(id) {
     <div class="badges">${wishBadge(r)}${methodBadge(r)}${autoBadge(r)}${cardBadge(r)}${(r.meals || []).map(m => `<span class="badge">${esc(m)}</span>`).join('')}${(r.tags || []).map(t => `<span class="badge tag">${esc(t)}</span>`).join('')}</div>
     ${r.wishlist ? `<div class="note warn">You have not been here yet${r.added ? ` · added ${esc(dateLabel(r.added))}` : ''}.${r.why ? `<br>${esc(r.why)}` : ''}</div>
       <div class="seg">${['Want to try', 'Booked'].map(w => `<button class="${r.wishlist === w ? 'on' : ''}" data-act="wstatus" data-id="${esc(id)}" data-v="${w}">${w}</button>`).join('')}</div>` : ''}
-    ${cardNote(r)}
-    ${autoNote(r)}
-    ${r.notes ? `<div class="note">${esc(r.notes)}</div>` : ''}
+    ${infoHtml(r)}
+    ${myNotesHtml(r)}
     ${ratingHtml(r)}
     ${visitsHtml(r)}
     ${r.lastVisit ? `<p class="mu">Last visit ${esc(dateLabel(r.lastVisit))}${r.visits ? ` · ${r.visits} visit${r.visits > 1 ? 's' : ''}` : ''}</p>` : ''}
@@ -417,7 +441,7 @@ function openRankings() {
 /* ---------- booking requests: Mesa -> Notion queue -> the Mac task ---------- */
 const reqs = () => (S.requests = S.requests || []);
 const REQ_ACTIVE = ['Pending', 'Working'];
-const canBookForMe = r => connected() && r.autoBooking === 'Books automatically';
+const canBookForMe = r => connected() && autoOf(r);
 async function bookForMe(id) {
   const r = find(id), d = readBook();
   if (!r || !d.date || !d.time) { toast('Pick a date and time first.'); return; }
@@ -594,7 +618,8 @@ function askCard(id) {
 }
 
 /* ---------- edit / add ---------- */
-const FIELDS = ['name', 'city', 'area', 'cuisine', 'price', 'method', 'bookingLink', 'platformId', 'website', 'phone', 'whatsapp', 'card', 'policy', 'notes', 'wishlist', 'why'];
+const FIELDS = ['name', 'city', 'area', 'cuisine', 'price', 'method', 'bookingLink', 'platformId', 'website', 'phone', 'whatsapp', 'policy', 'notes', 'wishlist', 'why', 'address', 'hours'];
+const CARD_WRITE = { Yes: 'Yes - guarantee', No: 'No', Unknown: 'Unknown' };
 function sel(idn, opts, cur) { return `<select class="field" id="${idn}">${opts.map(o => { const [v, l] = Array.isArray(o) ? o : [o, o || '—']; return `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`; }).join('')}</select>`; }
 function txt(idn, label, cur, ph = '', type = 'text') { return `<label class="lbl" for="${idn}">${label}</label><input class="field" id="${idn}" type="${type}" value="${esc(cur)}" placeholder="${esc(ph)}" autocomplete="off" autocapitalize="off">`; }
 function openEdit(id) {
@@ -606,7 +631,9 @@ function openEdit(id) {
     <span class="lbl">City</span>${sel('e_city', CITIES, r.city)}
     <label class="lbl" for="e_why">Why / who recommended it</label><input class="field" id="e_why" value="${esc(r.why || '')}" placeholder="e.g. Ana said the tasting menu is great" autocomplete="off" maxlength="500">
     ${txt('e_area', 'Area', r.area, 'Llafranc')}${txt('e_cuisine', 'Cuisine', r.cuisine, 'Japanese')}
+    ${txt('e_address', 'Address', r.address || '', 'Street, number, postcode, town')}
     ${txt('e_website', 'Website', r.website, 'https://…', 'url')}${txt('e_phone', 'Phone', r.phone, '+34 …', 'tel')}
+    <label class="lbl" for="e_hours">Opening hours</label><textarea class="field" id="e_hours" rows="3" placeholder="Tue-Sat 13:30-16:00, 20:30-23:30. Closed Sun and Mon.">${esc(r.hours || '')}</textarea>
     <details class="more"><summary>Booking and other details</summary>
     <span class="lbl">Meals</span><div class="checks">${MEALS.map(m => `<label><input type="checkbox" name="e_meal" value="${m}" ${(r.meals || []).includes(m) ? 'checked' : ''}> ${m}</label>`).join('')}</div>
     <span class="lbl">Tags</span><div class="checks" style="flex-wrap:wrap">${TAGS.map(t => `<label><input type="checkbox" name="e_tag" value="${esc(t)}" ${(r.tags || []).includes(t) ? 'checked' : ''}> ${esc(t)}</label>`).join('')}</div>
@@ -615,21 +642,24 @@ function openEdit(id) {
     ${txt('e_bookingLink', 'Booking page link', r.bookingLink, 'https://…', 'url')}
     ${txt('e_whatsapp', 'WhatsApp number (if they take bookings there)', r.whatsapp, '+34 …', 'tel')}
     ${txt('e_platformId', 'Booking platform id (optional)', r.platformId)}
-    <span class="lbl">Card needed</span>${sel('e_card', CARDS, r.card)}
+    <span class="lbl">Card required</span>${sel('e_card', CARDS, cardOf(r))}
     ${txt('e_policy', 'Deposit or cancellation policy', r.policy, 'e.g. 20 € per person, cancel 24 h before')}
-    <label class="lbl" for="e_notes">Notes</label><textarea class="field" id="e_notes">${esc(r.notes)}</textarea></details>
+    <label class="lbl" for="e_notes">Other notes (from research)</label><textarea class="field" id="e_notes">${esc(r.notes)}</textarea></details>
     <div class="actions"><button class="btn go" data-act="saveedit" data-id="${id ? esc(id) : ''}">Save</button><button class="btn" data-act="${id ? 'open' : 'close'}" data-id="${id ? esc(id) : ''}">Cancel</button></div>`);
   if (!id) setTimeout(() => $('e_name') && $('e_name').focus(), 50);
 }
 async function saveEdit(id) {
   const g = k => $('e_' + k).value.trim();
   const next = {}; for (const k of FIELDS) next[k] = g(k);
+  const cardSel = $('e_card').value, cardWas = id ? cardOf(find(id) || {}) : null;
+  if (!id || cardSel !== cardWas) next.card = CARD_WRITE[cardSel] || 'Unknown';
   next.meals = [...document.querySelectorAll('input[name=e_meal]:checked')].map(x => x.value);
   next.tags = [...document.querySelectorAll('input[name=e_tag]:checked')].map(x => x.value);
   if (!next.name) { toast('Give it a name.'); return; }
   if (id) {
     const r = find(id), diff = {};
     for (const k of [...FIELDS, 'meals', 'tags']) if (JSON.stringify(next[k]) !== JSON.stringify(r[k] ?? (k === 'meals' || k === 'tags' ? [] : ''))) diff[k] = next[k];
+    if (next.card !== undefined) diff.card = next.card;
     if (!Object.keys(diff).length) { openRestaurant(id); return; }
     await upd(id, diff); openRestaurant(id); render();
     return;
@@ -652,7 +682,7 @@ const SHARE_TXT = {
   de: { intro: 'Meine Restaurant-Tipps 🍽', wish: '🔖 Steht noch auf meiner Liste', cities: { Vienna: 'Wien' } },
 };
 const LANGS = [['en', 'English'], ['es', 'Español'], ['de', 'Deutsch']];
-const mapsUrl = r => 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent([r.name, r.area, r.city].filter(Boolean).join(' '));
+const mapsUrl = r => 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(r.address ? [r.name, r.address].join(' ') : [r.name, r.area, r.city].filter(Boolean).join(' '));
 let shareSel = new Set(), shareWish = false;
 
 function shareText() {
@@ -662,8 +692,9 @@ function shareText() {
   const line = (r, withCity) => {
     const head = [withCity ? cname(r.city) : '', r.area, r.cuisine, r.price].filter(Boolean).join(', ');
     const out = [`• ${r.name}${head ? ` (${head})` : ''}`];
-    const note = r.wishlist ? r.why : r.notes;
+    const note = [r.wishlist ? r.why : '', r.myNotes].filter(Boolean).join(' — ');
     if (o.notes && note) out.push('  ' + note);
+    if (o.map && r.address) out.push('  ' + r.address);
     if (o.web && safeUrl(r.website)) out.push('  ' + r.website);
     if (o.phone && r.phone) out.push('  📞 ' + r.phone);
     if (o.map) out.push('  🗺 ' + mapsUrl(r));
@@ -757,7 +788,7 @@ function settingsHtml() {
       <p class="muted" style="margin-top:0">Mesa never asks for or stores card numbers. When a restaurant wants a card, you type it on their own booking page, ideally a one-time Revolut card. Mesa only records <i>whether</i> a card was needed.</p></div>
     <div class="card"><h3>Demo</h3>
       <div class="actions">${S.demo ? '<button class="btn wide" data-act="demo-off">Remove demo data</button>' : '<button class="btn wide" data-act="demo-on">Load demo data</button>'}</div></div>
-    <p class="mu" style="text-align:center">Mesa · build 2026-11-06.13</p></div>`;
+    <p class="mu" style="text-align:center">Mesa · build 2026-11-10.14</p></div>`;
 }
 async function checkConn() {
   const out = $('checkOut'); out.innerHTML = '<div class="okbox">Checking…</div>';
@@ -937,6 +968,7 @@ document.addEventListener('change', e => {
   if (d.shid) { t.checked ? shareSel.add(d.shid) : shareSel.delete(d.shid); updateShare(); }
   else if ('shwish' in d) { shareWish = t.checked; if (!shareWish) for (const r of S.restaurants) if (r.wishlist) shareSel.delete(r.id); renderShareList(); updateShare(); }
   else if (d.shopt) { S.settings.share[d.shopt] = t.checked; save(); updateShare(); }
+  else if (d.mynotes) { const v = t.value.trim().slice(0, 1900); upd(d.mynotes, { myNotes: v }).then(() => { const h = $('myNotesHint'); if (h) h.textContent = 'Saved ✓'; }); }
 });
 document.addEventListener('keydown', e => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.rc')) { e.preventDefault(); openRestaurant(e.target.dataset.id); }
