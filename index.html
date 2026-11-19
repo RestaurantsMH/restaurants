@@ -247,7 +247,7 @@ const BOOK_REASONS = {
   'Online unavailable in check': 'online booking was unavailable during the check.'
 };
 const bookState = r => {
-  const v = r.autoBook !== undefined ? (r.autoBook ? 'Books automatically' : '') : (r.autoBooking || '');
+  const v = r.autoBooking || '';
   if (v === 'Books automatically') return 'hands-off';
   if (v === 'Needs card' || v === 'No online booking') return 'needs-you';
   return 'unknown';
@@ -257,7 +257,7 @@ const bookBadge = r => {
   return s === 'hands-off' ? '<span class="badge ok">✓ Hands-off</span>' : s === 'needs-you' ? '<span class="badge warn">⚠ Needs you</span>' : '<span class="badge">? Not verified</span>';
 };
 const autoInfo = r => {
-  const raw = r.autoBook !== undefined ? (r.autoBook ? 'Books automatically' : '') : (r.autoBooking || '');
+  const raw = r.autoBooking || '';
   const s = bookState(r);
   const head = s === 'hands-off' ? '<b class="okt">✓ Hands-off</b>' : s === 'needs-you' ? '<b class="warnt">⚠ Needs you</b>' : '<b>? Not verified</b>';
   return `${head} <span class="mu">${esc(raw || 'Not checked')}</span> - ${BOOK_REASONS[raw] || 'completion not demonstrated.'}`;
