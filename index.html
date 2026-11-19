@@ -299,7 +299,7 @@ function closeSheet() { reqOpen = ''; $('overlay').innerHTML = ''; }
 function cardNote(r) {
   const c = cardOf(r);
   if (c === 'No') return '<div class="note ok">Card required: No.</div>';
-  if (c === 'Unknown') return '<div class="note">Card required: Unknown. Mesa will ask after you book, so it is on record for next time.</div>';
+  if (c === 'Unknown') return '<div class="note">Card required: Unknown. Check whether a card or deposit is needed before you book, not after.</div>';
   return '<div class="note warn">Card required: Yes. Have a one-time card ready. Mesa never stores card numbers; you type them only on the restaurant’s own page.</div>';
 }
 const infoRow = (label, html) => `<div class="inf"><span class="mu">${label}</span><span>${html}</span></div>`;
@@ -546,7 +546,7 @@ function bookingUrl(r, d) {
 function bookSummary(d) { return `${dateLabel(d.date)} · ${d.time} · ${d.party} ${d.party > 1 ? 'people' : 'person'}`; }
 function updateMsg(id) {
   const r = find(id), d = readBook(); if (!r || !d.date || !d.time) return;
-  $('bkMsg').textContent = bookText(r, d);
+  $('bkMsg').textContent = instinctText(r, d);
   const c = $('bkCarry'); if (!c) return;
   const { url, carries } = bookingUrl(r, d);
   c.innerHTML = !url ? '' : carries
@@ -564,13 +564,14 @@ function openBook(id, keep) {
     <label class="lbl" for="bkTime">Time</label><input class="field" id="bkTime" type="time" value="${esc(d.time)}">
     <span class="lbl">People</span><div class="step"><button data-act="party" data-v="-1" aria-label="Fewer">−</button><b id="bkParty" data-v="${d.party}">${d.party}</b><button data-act="party" data-v="1" aria-label="More">+</button></div>
     <label class="lbl" for="bkNote">Note for the restaurant (optional)</label><input class="field" id="bkNote" maxlength="200" placeholder="Allergies, birthday, high chair…" value="${esc(d.note)}">
-    <span class="lbl">Message to send</span><div class="msg" id="bkMsg"></div>
+    <span class="lbl">Message to Instinct</span><div class="msg" id="bkMsg"></div>
     <div class="actions">
+      <button class="btn go wide" data-act="instinct" data-id="${esc(id)}">Ask Instinct to book</button>
+      <div class="mu wide">Opens WhatsApp with this request ready to send. Your table is booked only when Instinct confirms it in the chat.</div>
       ${canBookForMe(r) ? `<button class="btn go wide" data-act="bookforme" data-id="${esc(id)}">${r.method === 'TheFork' ? 'Book for me' : 'Check tables for me'}</button>` : ''}
-      ${link ? `<button class="btn ${canBookForMe(r) ? '' : 'go'} wide" data-act="openpage" data-id="${esc(id)}">Open booking page ↗</button><div class="mu wide" id="bkCarry"></div>` : `<div class="note wide">No booking page saved yet. Use WhatsApp or call, or add the link under “Edit details”.</div>`}
+      ${link ? `<button class="btn wide" data-act="openpage" data-id="${esc(id)}">Open booking page ↗</button><div class="mu wide" id="bkCarry"></div>` : `<div class="note wide">No booking page saved yet. Use WhatsApp or call, or add the link under “Edit details”.</div>`}
       ${r.whatsapp ? `<button class="btn" data-act="wa" data-id="${esc(id)}">WhatsApp</button>` : ''}
       ${r.phone ? `<a class="btn" href="tel:${esc(telDigits(r.phone))}">Call</a>` : ''}
-      <button class="btn" data-act="instinct" data-id="${esc(id)}">Ask Instinct</button>
       <button class="btn" data-act="copymsg">Copy message</button>
       <button class="btn wide" data-act="booked" data-id="${esc(id)}">✓ I booked it</button></div>
     <p class="mu">Book on the restaurant’s own page or by message. Then tap “I booked it” to save it to your calendar.</p>`);
@@ -904,12 +905,12 @@ const ACT = {
     const q = reqs().find(x => x.id === el.dataset.id), r = q && find(q.rid); if (!q || !r) return;
     if (q.status === 'Working') { toast('The Mac is working on it right now. Wait for the result first.'); return; }
     if (q.status === 'Pending' && !(await cancelRequest(q.id))) { toast('The Mac just picked it up. Wait for the result.'); openRequest(q.id); return; }
-    const num = String(S.settings.instinct || '').replace(/\D/g, ''), text = instinctText(r, { date: q.date, time: q.time, party: q.party, note: '' });
+    const num = String(S.settings.instinct || '16508702892').replace(/\D/g, ''), text = instinctText(r, { date: q.date, time: q.time, party: q.party, note: '' });
     window.open(`https://wa.me/${num}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
   },
   instinct: el => {
     const r = find(el.dataset.id), d = readBook(); if (!r || !d.date || !d.time) { toast('Pick a date and time first.'); return; }
-    const num = String(S.settings.instinct || '').replace(/\D/g, ''), text = instinctText(r, d);
+    const num = String(S.settings.instinct || '16508702892').replace(/\D/g, ''), text = instinctText(r, d);
     window.open(`https://wa.me/${num}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
   },
   booked: el => confirmBooked(el.dataset.id),
