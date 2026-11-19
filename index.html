@@ -233,6 +233,35 @@ async function upd(id, fields) {
 const cardBadge = r => cardOf(r) === 'No' ? '<span class="badge ok">No card</span>' : cardOf(r) === 'Yes' ? '<span class="badge warn">💳 Card needed</span>' : '<span class="badge">Card: ?</span>';
 const wishBadge = r => r.wishlist ? `<span class="badge wish">🔖 ${r.wishlist === 'Booked' ? 'Booked, not been yet' : 'Not been yet'}</span>` : '';
 const autoBadge = r => autoOf(r) ? '<span class="badge ok">✓ Auto-book</span>' : '';
+const BOOK_REASONS = {
+  'Books automatically': 'Instinct completed a booking here without help.',
+  'Needs card': 'a card guarantee is asked at booking; Instinct can still book once you approve that step.',
+  'No online booking': 'no online booking; a phone call is needed, which Instinct cannot place.',
+  'Captcha or block': 'booking is blocked by a captcha or site block; completion not demonstrated.',
+  'Manual': 'manual booking flow; unattended completion not demonstrated.',
+  'Not checked': 'not checked yet.',
+  'Pre-submit verified (no card)': 'checked up to the final confirmation screen; actual completion untested.',
+  'Partly verified': 'partly checked; actual completion untested.',
+  'Not verified - page issue': 'the booking page could not be verified.',
+  'Request - restaurant confirms': 'online request only; the restaurant confirms manually.',
+  'Online unavailable in check': 'online booking was unavailable during the check.'
+};
+const bookState = r => {
+  const v = r.autoBook !== undefined ? (r.autoBook ? 'Books automatically' : '') : (r.autoBooking || '');
+  if (v === 'Books automatically') return 'hands-off';
+  if (v === 'Needs card' || v === 'No online booking') return 'needs-you';
+  return 'unknown';
+};
+const bookBadge = r => {
+  const s = bookState(r);
+  return s === 'hands-off' ? '<span class="badge ok">✓ Hands-off</span>' : s === 'needs-you' ? '<span class="badge warn">⚠ Needs you</span>' : '<span class="badge">? Not verified</span>';
+};
+const autoInfo = r => {
+  const raw = r.autoBook !== undefined ? (r.autoBook ? 'Books automatically' : '') : (r.autoBooking || '');
+  const s = bookState(r);
+  const head = s === 'hands-off' ? '<b class="okt">✓ Hands-off</b>' : s === 'needs-you' ? '<b class="warnt">⚠ Needs you</b>' : '<b>? Not verified</b>';
+  return `${head} <span class="mu">${esc(raw || 'Not checked')}</span> - ${BOOK_REASONS[raw] || 'completion not demonstrated.'}`;
+};
 const methodBadge = r => r.method && r.method !== 'Unknown' ? `<span class="badge acc">${esc(r.method)}</span>` : '<span class="badge">Method: ?</span>';
 
 function visible() {
@@ -248,7 +277,7 @@ function cardHtml(r) {
   return `<div class="rc ${r.wishlist ? 'wish' : ''}" role="button" tabindex="0" data-act="open" data-id="${esc(r.id)}"><div class="top"><div class="nm"><b>${esc(r.name)}</b><span>${esc(sub || r.city)}</span></div>
     ${r.wishlist ? '' : `<button class="star ${r.favourite ? 'on' : ''}" data-act="star" data-id="${esc(r.id)}" aria-label="Favourite">★</button>`}</div>
     ${r.wishlist && r.why ? `<span class="mu" style="display:block;margin-top:4px">${esc(r.why)}</span>` : ''}
-    <div class="badges">${wishBadge(r)}${methodBadge(r)}${autoBadge(r)}${cardBadge(r)}${scoreBadge(r)}${r.visits ? `<span class="badge">${r.visits} visit${r.visits > 1 ? 's' : ''}</span>` : ''}</div>
+    <div class="badges">${bookBadge(r)}${wishBadge(r)}${methodBadge(r)}${cardBadge(r)}${scoreBadge(r)}${r.visits ? `<span class="badge">${r.visits} visit${r.visits > 1 ? 's' : ''}</span>` : ''}</div>
     ${(r.tags || []).length ? `<div class="badges" style="margin-top:6px">${r.tags.map(t => `<span class="badge tag">${esc(t)}</span>`).join('')}</div>` : ''}</div>`;
 }
 function renderList() {
@@ -313,7 +342,7 @@ function infoHtml(r) {
     ${infoRow('Opening hours', r.hours ? esc(r.hours).replace(/\n/g, '<br>') : `<span class="mu">—</span> ${add}`)}
     ${web ? infoRow('Website', `<a href="${esc(web)}" target="_blank" rel="noopener">${esc(web.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''))} ↗</a>`) : ''}
     ${infoRow('Card required', yn(cardOf(r), 'Yes', 'No'))}
-    ${infoRow('Auto booking', autoOf(r) ? '<b class="okt">Yes</b>' : '<b>No</b>')}
+    ${infoRow('Auto booking', autoInfo(r))}
     ${r.method && r.method !== 'Unknown' ? infoRow('Booked via', esc(r.method)) : ''}
     ${cardOf(r) === 'Yes' ? '<p class="mu" style="margin:6px 0 0">Have a one-time card ready. Mesa never stores card numbers; you type them only on the restaurant’s own page.</p>' : ''}</div>`;
 }
@@ -325,7 +354,7 @@ function openRestaurant(id) {
   const link = safeUrl(r.bookingLink), web = safeUrl(r.website);
   openSheet(`<div class="hd" style="margin:0 0 4px"><div><h2>${esc(r.name)}</h2><div class="mu">${esc([r.area, r.cuisine, r.city, r.price].filter(Boolean).join(' · '))}</div></div>
       ${r.wishlist ? '' : `<button class="star ${r.favourite ? 'on' : ''}" data-act="star" data-id="${esc(id)}" data-sheet="1" aria-label="Favourite">★</button>`}</div>
-    <div class="badges">${wishBadge(r)}${methodBadge(r)}${autoBadge(r)}${cardBadge(r)}${(r.meals || []).map(m => `<span class="badge">${esc(m)}</span>`).join('')}${(r.tags || []).map(t => `<span class="badge tag">${esc(t)}</span>`).join('')}</div>
+    <div class="badges">${bookBadge(r)}${wishBadge(r)}${methodBadge(r)}${cardBadge(r)}${(r.meals || []).map(m => `<span class="badge">${esc(m)}</span>`).join('')}${(r.tags || []).map(t => `<span class="badge tag">${esc(t)}</span>`).join('')}</div>
     ${r.wishlist ? `<div class="note warn">You have not been here yet${r.added ? ` · added ${esc(dateLabel(r.added))}` : ''}.${r.why ? `<br>${esc(r.why)}` : ''}</div>
       <div class="seg">${['Want to try', 'Booked'].map(w => `<button class="${r.wishlist === w ? 'on' : ''}" data-act="wstatus" data-id="${esc(id)}" data-v="${w}">${w}</button>`).join('')}</div>` : ''}
     ${infoHtml(r)}
