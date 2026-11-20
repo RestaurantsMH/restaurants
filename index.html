@@ -312,9 +312,9 @@ function bookingsHtml() {
   const row = (b, btns) => `<div class="bk"><div><b>${esc(b.name)}</b><div class="when">${esc(dateLabel(b.date))} · ${esc(b.time)} · ${b.party} ${b.party > 1 ? 'people' : 'person'}</div></div><div class="chips">${btns}</div></div>`;
   return `<div class="hd"><h1>Bookings</h1></div><div class="stack">
     ${ask.length ? `<div class="card"><h3>Did you go?</h3>${ask.map(b => row(b, `<button class="chip" data-act="went" data-id="${b.id}">Yes ✓</button><button class="chip" data-act="cancel" data-id="${b.id}">No</button>`)).join('')}</div>` : ''}
-    ${reqs().length ? `<div class="card"><h3>Requests</h3>${reqs().slice(0, 5).map(x => `<div class="bk"><div><b>${esc(x.name)}</b><div class="when">${esc(dateLabel(x.date))} · ${esc(x.time)} · ${x.party} · ${x.kind === 'Book' ? 'booking' : 'checking'} · ${esc(x.status.toLowerCase())}</div></div><div class="chips"><button class="chip" data-act="openreq" data-id="${esc(x.id)}">Open</button></div></div>`).join('')}</div>` : ''}
+    ${visibleReqs().length ? `<div class="card"><h3>Requests</h3>${visibleReqs().slice(0, 5).map(x => `<div class="bk"><div><b>${esc(x.name)}</b><div class="when">${esc(dateLabel(x.date))} · ${esc(x.time)} · ${x.party} · ${x.kind === 'Book' ? 'booking' : 'checking'} · ${esc(x.status.toLowerCase())}</div></div><div class="chips"><button class="chip" data-act="openreq" data-id="${esc(x.id)}">Open</button></div></div>`).join('')}</div>` : ''}
     <div class="card"><h3>Upcoming</h3>${up.length ? up.map(b => row(b, `<button class="chip" data-act="open" data-id="${esc(b.rid)}">Details</button><button class="chip" data-act="cancel" data-id="${b.id}">Cancel</button>`)).join('') : '<p class="empty">No bookings yet. Open a restaurant and tap “Book a table”.</p>'}</div>
-    ${hist.length ? `<div class="card"><h3>Been there</h3>${hist.map(b => row(b, '')).join('')}</div>` : ''}
+    ${hist.length ? `<div class="card"><h3 data-act="beentoggle" role="button" tabindex="0" style="cursor:pointer;display:flex;justify-content:space-between;align-items:baseline">Been there <span class="mu">${hist.length} ${S.settings.beenCollapsed ? '▸' : '▾'}</span></h3>${S.settings.beenCollapsed ? '' : hist.map(b => row(b, '')).join('')}</div>` : ''}
     <p class="mu">Bookings are kept on this phone. “I booked it” also puts the table in your Google Calendar. Cancelling here does not delete the calendar event.</p></div>`;
 }
 
@@ -330,7 +330,7 @@ function cardNote(r) {
   const c = cardOf(r);
   if (c === 'No') return '<div class="note ok">Card required: No.</div>';
   if (c === 'Unknown') return '<div class="note">Card required: Unknown. Check whether a card or deposit is needed before you book, not after.</div>';
-  return '<div class="note warn">Card required: Yes. Have a one-time card ready. Mesa never stores card numbers; you type them only on the restaurant’s own page.</div>';
+  return '<div class="note warn">Card required: Yes. Mesa never stores card numbers; you type them only on the restaurant’s own page. A deposit or no-show guarantee needs a card that stays valid until after the visit.</div>';
 }
 const infoRow = (label, html) => `<div class="inf"><span class="mu">${label}</span><span>${html}</span></div>`;
 const yn = (v, yes, no) => v === 'Yes' ? `<b class="warnt">${yes}</b>` : v === 'No' ? `<b class="okt">${no}</b>` : '<span class="mu">Unknown</span>';
@@ -345,8 +345,12 @@ function infoHtml(r) {
     ${infoRow('Card required', yn(cardOf(r), 'Yes', 'No'))}
     ${infoRow('Auto booking', autoInfo(r))}
     ${r.method && r.method !== 'Unknown' ? infoRow('Booked via', esc(r.method)) : ''}
-    ${cardOf(r) === 'Yes' ? '<p class="mu" style="margin:6px 0 0">Have a one-time card ready. Mesa never stores card numbers; you type them only on the restaurant’s own page.</p>' : ''}</div>`;
+    ${cardOf(r) === 'Yes' ? '<p class="mu" style="margin:6px 0 0">Mesa never stores card numbers; you type them only on the restaurant’s own page. A deposit or no-show guarantee needs a card that stays valid until after the visit.</p>' : ''}</div>`;
 }
+const bookingNoteHtml = r => { const b = upcoming().find(x => x.rid === r.id); if (!b) return '';
+  return `<div style="margin:10px 0"><label class="lbl" for="bkNoteBox">Your booking · ${esc(dateLabel(b.date))} · ${esc(b.time)} · ${b.party} ${b.party > 1 ? 'people' : 'person'}</label>
+  <textarea class="field" id="bkNoteBox" data-bknote="${esc(b.id)}" rows="6" maxlength="900" placeholder="Booking terms, confirmation code…">${esc(b.note || '')}</textarea>
+  <p class="mu" style="margin:4px 0 0" id="bkNoteHint">Saved when you tap away. Only kept on this phone.</p></div>`; };
 const myNotesHtml = r => `<div style="margin:10px 0"><label class="lbl" for="myNotesBox">My notes</label>
   <textarea class="field" id="myNotesBox" data-mynotes="${esc(r.id)}" rows="3" placeholder="What to order, where to sit, who to ask for…">${esc(r.myNotes || '')}</textarea>
   <p class="mu" style="margin:4px 0 0" id="myNotesHint">Saved when you tap away. Shared when you recommend this place.</p></div>`;
@@ -359,6 +363,7 @@ function openRestaurant(id) {
     ${r.wishlist ? `<div class="note warn">You have not been here yet${r.added ? ` · added ${esc(dateLabel(r.added))}` : ''}.${r.why ? `<br>${esc(r.why)}` : ''}</div>
       <div class="seg">${['Want to try', 'Booked'].map(w => `<button class="${r.wishlist === w ? 'on' : ''}" data-act="wstatus" data-id="${esc(id)}" data-v="${w}">${w}</button>`).join('')}</div>` : ''}
     ${infoHtml(r)}
+    ${bookingNoteHtml(r)}
     ${myNotesHtml(r)}
     ${ratingHtml(r)}
     ${visitsHtml(r)}
@@ -387,8 +392,8 @@ async function scanBookings(opts) {
     const n = plainName(x.name), r = S.restaurants.find(r => { const m = plainName(r.name); return m.length > 3 && n.length > 3 && (n === m || n.includes(m) || m.includes(n)); });
     let b = S.bookings.find(y => y.key === x.key) || (r && S.bookings.find(y => y.rid === r.id && y.date === x.date && y.time === x.time && y.status !== 'cancelled'));
     if (x.status === 'cancelled') { if (b && b.status === 'booked') { b.status = 'cancelled'; } continue; }
-    if (b) { b.key = b.key || x.key; if (x.cal) b.cal = true; continue; }
-    S.bookings.push({ id: 'e' + Date.now().toString(36) + added, key: x.key, rid: r ? r.id : '', name: r ? r.name : x.name, city: r ? r.city : '', date: x.date, time: x.time, party: x.party || 2, note: 'From your booking email', status: opts && opts.rescan && x.date < today() ? 'went' : 'booked', cal: !!x.cal });
+    if (b) { b.key = b.key || x.key; if (x.cal) b.cal = true; if (x.note && (!b.note || b.note === 'From your booking email')) b.note = x.note; continue; }
+    S.bookings.push({ id: 'e' + Date.now().toString(36) + added, key: x.key, rid: r ? r.id : '', name: r ? r.name : x.name, city: r ? r.city : '', date: x.date, time: x.time, party: x.party || 2, note: x.note || 'From your booking email', status: opts && opts.rescan && x.date < today() ? 'went' : 'booked', cal: !!x.cal });
     if (r && r.wishlist === 'Want to try' && x.date >= today()) upd(r.id, { wishlist: 'Booked' });
     added++;
   }
@@ -470,6 +475,8 @@ function openRankings() {
 
 /* ---------- booking requests: Mesa -> Notion queue -> the Mac task ---------- */
 const reqs = () => (S.requests = S.requests || []);
+// Stale terminal requests (Failed/Cancelled, date already past) are hidden, not deleted; the record keeps its real status.
+const visibleReqs = () => reqs().filter(x => !(x.date < today() && (x.status === 'Failed' || x.status === 'Cancelled')));
 const REQ_ACTIVE = ['Pending', 'Working'];
 const canBookForMe = r => connected() && autoOf(r);
 async function bookForMe(id) {
@@ -914,6 +921,7 @@ const ACT = {
   shsend: () => shareSend(),
   shwa: () => { const t = shareText(); if (t) window.open('https://wa.me/?text=' + encodeURIComponent(t), '_blank', 'noopener'); else toast('Tick at least one place.'); },
   shcopy: () => { const t = shareText(); if (t) copyText(t); else toast('Tick at least one place.'); },
+  beentoggle: () => { S.settings.beenCollapsed = !S.settings.beenCollapsed; save(); render(); },
   reload: () => loadList(),
   open: el => openRestaurant(el.dataset.id),
   close: () => closeSheet(),
@@ -999,6 +1007,7 @@ document.addEventListener('change', e => {
   if (d.shid) { t.checked ? shareSel.add(d.shid) : shareSel.delete(d.shid); updateShare(); }
   else if ('shwish' in d) { shareWish = t.checked; if (!shareWish) for (const r of S.restaurants) if (r.wishlist) shareSel.delete(r.id); renderShareList(); updateShare(); }
   else if (d.shopt) { S.settings.share[d.shopt] = t.checked; save(); updateShare(); }
+  else if (d.bknote) { const b = S.bookings.find(x => x.id === d.bknote); if (b) { b.note = t.value.trim().slice(0, 900); save(); const h = $('bkNoteHint'); if (h) h.textContent = 'Saved \u2713'; } }
   else if (d.mynotes) { const v = t.value.trim().slice(0, 1900); upd(d.mynotes, { myNotes: v }).then(() => { const h = $('myNotesHint'); if (h) h.textContent = 'Saved ✓'; }); }
 });
 document.addEventListener('keydown', e => {
