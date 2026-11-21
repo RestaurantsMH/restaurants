@@ -167,15 +167,342 @@ const MEALS = ['Lunch', 'Dinner', 'Brunch'];
 const TAGS = ['Terrace', 'Sea view', 'Group-friendly', 'Kids welcome', 'Romantic', 'Special occasion', 'Casual', 'Fine dining', 'Vegetarian options', 'Dog-friendly', 'Quiet', 'Lively'];
 
 /* ---------- state ---------- */
-function blank() { return { restaurants: [], visits: [], at: 0, bookings: [], requests: [], settings: { baseUrl: '', appKey: '', theme: 'dark', name: '', phone: '', share: { lang: 'en', web: true, map: true, phone: false, notes: true } }, status: {}, demo: false }; }
+/* Mesa store merge rules — single source of truth.
+ * Inlined into client-v39.html by build.mjs and imported by test/client-merge.test.mjs.
+ *
+ * mergeStates(stored, local) returns the one state to persist and adopt.
+ * It runs inside an exclusive Web Lock, after re-reading localStorage, so a stale
+ * tab or second window cannot blindly overwrite what another writer just saved.
+ * Every rule below names exactly one winner per field; nothing is "union magic"
+ * and nothing is whole-object last-writer-wins.
+ *
+ * Timestamps:
+ *   r._syncAt            last successful /restaurants/list fetch that carried this restaurant
+ *   r._uAt.{myNotes,rating}   when the user last edited that field on a device
+ *   b._statusAt          when the user last set a booking outcome (went/cancelled) on a device
+ *   b._noteAt            when the user last edited the booking note on a device
+ *   b._termsAt           updatedAt of the delivery record the terms came from
+ *   settings._at.<key>   when a settings key last changed on a device
+ * A missing timestamp is 0 (legacy state). Ties go to `stored` (stable), except
+ * where a rule says the writer (local) wins.
+ */
+(function (root, factory) {
+  const api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else Object.assign(root, api);
+})(typeof self !== 'undefined' ? self : globalThis, function () {
+
+const SYNCED_R_FIELDS = ['name', 'city', 'area', 'cuisine', 'price', 'method', 'bookingLink', 'platformId',
+  'website', 'phone', 'whatsapp', 'policy', 'notes', 'wishlist', 'why', 'address', 'hours',
+  'card', 'cardStatus', 'autoBooking', 'autoNotes', 'autoBook', 'meals', 'tags', 'visits', 'lastVisit',
+  'favourite', 'added', 'email'];
+const USER_R_FIELDS = ['myNotes', 'rating'];
+const USER_BOOKING_STATES = ['went', 'cancelled']; // outcomes only a user sets on a device
+const DEFAULT_NOTE = 'From your booking email';
+const TOMB_CAP = 200;
+
+const ts = x => typeof x === 'string' ? (Date.parse(x) || 0) : (Number(x) || 0);
+const plain = o => (o && typeof o === 'object') ? o : {};
+
+function mergeTombs(a, b) {
+  const out = Object.assign({}, plain(a), plain(b));
+  const keys = Object.keys(out);
+  if (keys.length > TOMB_CAP) keys.sort((x, y) => ts(out[x]) - ts(out[y])).slice(0, keys.length - TOMB_CAP).forEach(k => delete out[k]);
+  return out;
+}
+
+function mergeRestaurant(st, lc) {
+  const out = Object.assign({}, st);
+  // Notion-synced fields: the copy from the newer successful list fetch wins.
+  const syncWinner = ts(lc._syncAt) > ts(st._syncAt) ? lc : st;
+  for (const f of SYNCED_R_FIELDS) if (syncWinner[f] !== undefined) out[f] = syncWinner[f];
+  // User fields: the newer per-field user edit wins. With neither timestamped,
+  // a non-empty local value wins over an empty stored one (protects legacy edits).
+  const ua = plain(st._uAt), ub = plain(lc._uAt);
+  out._uAt = Object.assign({}, ua, ub);
+  for (const f of USER_R_FIELDS) {
+    const a = ts(ua[f]), b = ts(ub[f]);
+    if (a || b) { const v = b > a ? lc[f] : st[f]; out[f] = v === undefined ? null : v; out._uAt[f] = Math.max(a, b); }
+    else { const v = (lc[f] !== undefined && lc[f] !== null && lc[f] !== '') ? lc[f] : st[f]; out[f] = v === undefined ? null : v; }
+  }
+  out._syncAt = Math.max(ts(st._syncAt), ts(lc._syncAt));
+  return out;
+}
+
+function mergeRestaurants(stList, lcList, tombs) {
+  // Membership authority: every successful list fetch stamps the FULL list with one
+  // _syncAt, so a restaurant whose newest _syncAt is older than the newest fetch seen
+  // by either side was absent from that fetch - archived in Notion - and drops out.
+  // Restaurants never stamped (local-only) always survive; tombstoned never do.
+  const all = [...(Array.isArray(stList) ? stList : []), ...(Array.isArray(lcList) ? lcList : [])];
+  const maxSync = new Map(); let horizon = 0;
+  for (const r of all) { if (!r || !r.id) continue; const v = ts(r._syncAt); if (v > (maxSync.get(r.id) || 0)) maxSync.set(r.id, v); if (v > horizon) horizon = v; }
+  const archived = id => { const v = maxSync.get(id) || 0; return v > 0 && v < horizon; };
+  const map = new Map();
+  for (const r of Array.isArray(stList) ? stList : []) if (r && r.id && !tombs[r.id] && !archived(r.id)) map.set(r.id, r);
+  for (const r of Array.isArray(lcList) ? lcList : []) {
+    if (!r || !r.id || tombs[r.id] || archived(r.id)) continue;
+    map.set(r.id, map.has(r.id) ? mergeRestaurant(map.get(r.id), r) : r);
+  }
+  return [...map.values()];
+}
+
+function mergeVisits(stList, lcList, tombs) {
+  const map = new Map();
+  for (const v of [...(Array.isArray(stList) ? stList : []), ...(Array.isArray(lcList) ? lcList : [])]) {
+    if (!v || !v.id || tombs[v.id]) continue;
+    const cur = map.get(v.id);
+    map.set(v.id, cur && ts(cur.at) > ts(v.at) ? cur : v); // newer record wins; visits are append-mostly
+  }
+  return [...map.values()];
+}
+
+function mergeBooking(st, lc) {
+  const out = Object.assign({}, st);
+  // status. Every status change carries _statusSrc ('user'|'server') and _statusAt.
+  // 1. The newest USER decision (incl. undo back to 'booked') wins over anything older.
+  // 2. A SERVER cancellation newer than the last user decision beats a user 'booked' -
+  //    a cancellation email must never lose to a stale tab or an earlier undo.
+  // 3. With no user decisions at all, 'cancelled' beats 'booked'.
+  const aS = st._statusSrc === 'user' ? ts(st._statusAt) : 0;
+  const bS = lc._statusSrc === 'user' ? ts(lc._statusAt) : 0;
+  if (aS || bS) {
+    const w = bS > aS ? lc : st, other = bS > aS ? st : lc;
+    out.status = w.status; out._statusSrc = w._statusSrc; out._statusAt = Math.max(aS, bS);
+    if (w.status === 'booked' && other.status === 'cancelled' && other._statusSrc === 'server' && ts(other._statusAt) >= Math.max(aS, bS)) {
+      out.status = 'cancelled'; out._statusSrc = 'server'; out._statusAt = ts(other._statusAt);
+    }
+  } else if (st.status !== lc.status) {
+    const w = (st.status === 'cancelled' || lc.status === 'cancelled') ? (st.status === 'cancelled' ? st : lc) : lc;
+    out.status = w.status; out._statusSrc = w._statusSrc || 'server'; out._statusAt = Math.max(ts(st._statusAt), ts(lc._statusAt));
+  } else { out._statusSrc = st._statusSrc || lc._statusSrc; out._statusAt = Math.max(ts(st._statusAt), ts(lc._statusAt)); }
+  // note: newer user edit wins; the scanner's default placeholder never beats real text.
+  const an = ts(st._noteAt), bn = ts(lc._noteAt);
+  const real = v => !!(v && v !== DEFAULT_NOTE);
+  if (an || bn) { const w = bn > an ? lc : st; out.note = w.note || ''; out._noteAt = Math.max(an, bn); }
+  else if (real(st.note) && real(lc.note)) out.note = lc.note;
+  else out.note = real(lc.note) ? lc.note : (real(st.note) ? st.note : '');
+  // terms: server-owned, newest delivery wins.
+  const at = ts(st._termsAt), bt = ts(lc._termsAt);
+  const tw = bt > at ? lc : st;
+  out.terms = tw.terms || ''; out._termsAt = Math.max(at, bt);
+  // calendar flag is only ever added, never removed.
+  out.cal = !!(st.cal || lc.cal);
+  // key-stable fields: same key => same date/time; prefer the terms-newer copy, fill gaps from the other.
+  for (const f of ['party', 'date', 'time']) out[f] = tw[f] !== undefined ? tw[f] : (st[f] !== undefined ? st[f] : lc[f]);
+  for (const f of ['rid', 'name', 'city', 'id']) out[f] = lc[f] || st[f] || '';
+  return out;
+}
+
+function mergeBookings(stList, lcList) {
+  const keyOf = b => b.key || b.id;
+  const map = new Map();
+  for (const b of Array.isArray(stList) ? stList : []) if (b && keyOf(b)) map.set(keyOf(b), b);
+  for (const b of Array.isArray(lcList) ? lcList : []) {
+    if (!b || !keyOf(b)) continue;
+    const k = keyOf(b), cur = map.get(k);
+    if (cur) map.set(k, mergeBooking(cur, b));
+    else { map.set(k, b); if (b.key && b.id && b.key !== b.id) map.set(b.id, b); }
+  }
+  // de-duplicate alias entries (keyed under both key and id)
+  const seen = new Set(), out = [];
+  for (const b of map.values()) { const id = b.id || b.key; if (seen.has(id)) continue; seen.add(id); out.push(b); }
+  return out;
+}
+
+function mergeRequests(stList, lcList) {
+  const map = new Map();
+  for (const q of Array.isArray(stList) ? stList : []) if (q && q.id) map.set(q.id, q);
+  for (const q of Array.isArray(lcList) ? lcList : []) {
+    if (!q || !q.id) continue;
+    const cur = map.get(q.id);
+    map.set(q.id, cur && ts(cur.at) > ts(q.at) ? cur : q);
+  }
+  return [...map.values()];
+}
+
+function mergeSettings(st, lc) {
+  const out = Object.assign({}, st, {});
+  const a = plain(st._at), b = plain(lc._at);
+  out._at = Object.assign({}, a, b);
+  for (const k of new Set([...Object.keys(st || {}), ...Object.keys(lc || {})])) {
+    if (k === '_at' || k === 'share') continue;
+    if (k === 'deviceId') { out.deviceId = lc.deviceId || st.deviceId || ''; continue; } // device-specific: writer keeps its own
+    if (a[k] || b[k]) { const w = ts(b[k]) > ts(a[k]) ? lc : st; out[k] = w[k]; out._at[k] = Math.max(ts(a[k]), ts(b[k])); }
+    else out[k] = lc[k] !== undefined ? lc[k] : st[k];
+  }
+  const sa = plain(st.share), sb = plain(lc.share), as = plain(a.share), bs = plain(b.share);
+  out.share = Object.assign({}, sa, sb);
+  out._at.share = Object.assign({}, as, bs);
+  for (const k of new Set([...Object.keys(sa), ...Object.keys(sb)])) {
+    if (as[k] || bs[k]) { const w = ts(bs[k]) > ts(as[k]) ? sb : sa; out.share[k] = w[k]; out._at.share[k] = Math.max(ts(as[k]), ts(bs[k])); }
+    else out.share[k] = sb[k] !== undefined ? sb[k] : sa[k];
+  }
+  return out;
+}
+
+function mergeStates(stored, local) {
+  const st = plain(stored), lc = plain(local);
+  const tombs = { visits: mergeTombs(plain(st.tombs).visits, plain(lc.tombs).visits), restaurants: mergeTombs(plain(st.tombs).restaurants, plain(lc.tombs).restaurants) };
+  const out = {
+    restaurants: mergeRestaurants(st.restaurants, lc.restaurants, tombs.restaurants),
+    visits: mergeVisits(st.visits, lc.visits, tombs.visits),
+    bookings: mergeBookings(st.bookings, lc.bookings),
+    requests: mergeRequests(st.requests, lc.requests),
+    settings: mergeSettings(plain(st.settings), plain(lc.settings)),
+    tombs,
+    // writer's session scalars: the writer (local) wins; these are not shared truth.
+    at: Math.max(ts(st.at), ts(lc.at)),
+    rescanned: !!(st.rescanned || lc.rescanned),
+    demo: !!lc.demo,
+    status: Object.assign({}, plain(st.status), plain(lc.status)),
+    pendingRejects: [...new Set([...(Array.isArray(st.pendingRejects) ? st.pendingRejects : []), ...(Array.isArray(lc.pendingRejects) ? lc.pendingRejects : [])])],
+    _v: Math.max(ts(st._v), ts(lc._v)) + 1,
+  };
+  return out;
+}
+
+/* Coordinated persistence, shared by every writer (user edits, delivery sync, polls).
+ * save() serializes writers in this tab; each save re-reads the stored object, merges
+ * field-by-field (mergeStates), writes, and READS BACK to verify the write landed as
+ * the newest version. Cross-tab exclusion comes from Web Locks where available; the
+ * fallback is a localStorage mutex with stale-lock recovery. The actual guarantee is
+ * verify-and-retry: the last writer's read-back always passes, every earlier writer
+ * detects the conflict and retries against the newer state, so no write is silently
+ * lost. If verification keeps failing, save() resolves false - callers must treat
+ * false as NOT durably saved (no ack, no confirm).
+ * opts.hooks.betweenReadAndWrite is a test seam only (simulates cross-tab interleaving). */
+function createPersist(opts) {
+  const { storage, locks, key, ledgerKey, onError, hooks } = opts;
+  const lockKey = key + '.lock';
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let chain = Promise.resolve(true);
+
+  function readRaw() { try { return JSON.parse(storage.getItem(key) || 'null'); } catch { return null; } }
+
+  /* Acked-delivery ledger, a SEPARATE storage key the old (pre-repair) client never
+   * writes: its blind whole-state save can clobber the main key but cannot touch the
+   * ledger. Rules (fixed by adversarial lifecycle review):
+   *  R1 the ledger mirrors every keyed booking's current local truth (status incl.
+   *     cancellations, terms version, note version) at EVERY successful save, inside
+   *     the same lock - never write-once-at-ack, never outside the lock.
+   *  R2 an unverifiable ledger write vetoes the save (and with it any delivery ack).
+   *  R3 entries are never evicted on presence; only a generous cap (500) prunes
+   *     bookings more than 120 days past, oldest first - anything the server could
+   *     still re-offer (60-day window) or the app could display stays covered.
+   *  R4 every save first REPAIRS the stored state from the ledger: missing keyed
+   *     bookings are re-injected (a cancelled one comes back AS cancelled), and
+   *     present-but-stale terms/status/note fields refresh from the newer version. */
+  const LEDGER_CAP = 500;
+  function ledgerRead() { try { return JSON.parse(storage.getItem(ledgerKey) || '{}') || {}; } catch { return {}; } }
+  function ledgerRepair(stored) {
+    if (!ledgerKey || !stored || typeof stored !== 'object') return stored;
+    const led = ledgerRead();
+    const bookings = Array.isArray(stored.bookings) ? stored.bookings : (stored.bookings = []);
+    for (const k of Object.keys(led)) {
+      const e = led[k]; if (!e || e.key !== k) continue;
+      const b = bookings.find(x => x && x.key === k);
+      if (!b) { bookings.push(Object.assign({}, e)); continue; }
+      if (ts(e._termsAt) > ts(b._termsAt)) { b.terms = e.terms; b._termsAt = e._termsAt; }
+      if (ts(e._statusAt) > ts(b._statusAt)) { b.status = e.status; b._statusSrc = e._statusSrc; b._statusAt = e._statusAt; }
+      if (ts(e._noteAt) > ts(b._noteAt)) { b.note = e.note; b._noteAt = e._noteAt; }
+    }
+    return stored;
+  }
+  function ledgerWrite(merged) {
+    if (!ledgerKey) return true;
+    const now = Date.now();
+    const keyed = (Array.isArray(merged.bookings) ? merged.bookings : []).filter(b => b && b.key)
+      .sort((a, b2) => String(b2.date || '').localeCompare(String(a.date || '')));
+    const led = {}; let kept = 0;
+    for (const b of keyed) {
+      const pastDays = b.date ? (now - Date.parse(b.date + 'T' + (b.time || '23:59') + 'Z')) / 864e5 : 0;
+      if (kept >= LEDGER_CAP && pastDays > 120) continue; // R3: only deep history beyond the cap prunes
+      led[b.key] = b; kept++;
+    }
+    const payload = JSON.stringify(led);
+    storage.setItem(ledgerKey, payload);
+    let back = null; try { back = storage.getItem(ledgerKey); } catch { back = null; }
+    return back === payload; // R2: byte-exact verification, same standard as the main key
+  }
+
+  async function writeMerged(getState) {
+    let stored = readRaw();
+    if (hooks && hooks.betweenReadAndWrite) await hooks.betweenReadAndWrite();
+    const local = getState();
+    if (stored && typeof stored === 'object') stored = ledgerRepair(stored); // R4
+    const merged = stored && typeof stored === 'object' ? mergeStates(stored, local) : local;
+    const payload = JSON.stringify(merged);
+    storage.setItem(key, payload);
+    if (hooks && hooks.betweenWriteAndVerify) await hooks.betweenWriteAndVerify();
+    let backRaw = null;
+    try { backRaw = storage.getItem(key); } catch { backRaw = null; }
+    if (backRaw !== payload) return null; // conflict detected (byte-exact readback)
+    if (!ledgerWrite(merged)) return null; // R2: unverifiable ledger vetoes the save
+    return merged;
+  }
+
+  function acquireMutex(owner) {
+    const now = Date.now();
+    let cur = null;
+    try { cur = JSON.parse(storage.getItem(lockKey) || 'null'); } catch { cur = null; }
+    if (cur && cur.owner !== owner && now - (cur.at || 0) < 10000) return false; // held and fresh
+    storage.setItem(lockKey, JSON.stringify({ owner, at: now }));
+    try { const back = JSON.parse(storage.getItem(lockKey) || 'null'); return !!(back && back.owner === owner); } catch { return false; }
+  }
+  function releaseMutex(owner) {
+    try { const cur = JSON.parse(storage.getItem(lockKey) || 'null'); if (cur && cur.owner === owner) storage.removeItem(lockKey); } catch { /* best effort */ }
+  }
+
+  async function persistNow(getState, adopt) {
+    try {
+      if (locks && locks.request) {
+        let merged = null;
+        await locks.request('mesa-store', async () => { merged = await writeMerged(getState); });
+        if (merged) { adopt(merged); return true; }
+      } else {
+        const owner = 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        for (let i = 0; i < 8; i++) {
+          if (acquireMutex(owner)) {
+            try {
+              const merged = await writeMerged(getState);
+              if (merged) { adopt(merged); return true; }
+            } finally { releaseMutex(owner); }
+          }
+          await sleep(20 * (i + 1));
+        }
+      }
+    } catch (e) { /* fall through to failure */ }
+    if (onError) onError();
+    return false;
+  }
+
+  return {
+    save(getState, adopt) {
+      chain = chain.then(() => persistNow(getState, adopt)).catch(() => false);
+      return chain;
+    },
+  };
+}
+
+return { mergeStates, mergeBooking, mergeRestaurant, createPersist, DEFAULT_NOTE, USER_BOOKING_STATES };
+});
+
+function blank() { return { restaurants: [], visits: [], at: 0, bookings: [], requests: [], settings: { baseUrl: '', appKey: '', theme: 'dark', name: '', phone: '', share: { lang: 'en', web: true, map: true, phone: false, notes: true }, deviceId: '' }, status: {}, demo: false, tombs: { visits: {} }, pendingRejects: [] }; }
 function load() {
-  try { const o = JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); const s = Object.assign(blank(), o); s.settings = Object.assign(blank().settings, o.settings); if (s.settings.share && !s.settings.share.v2) { s.settings.share.notes = true; s.settings.share.v2 = true; } return s; }
+  try { const o = JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); const s = Object.assign(blank(), o); s.settings = Object.assign(blank().settings, o.settings); if (s.settings.share && !s.settings.share.v2) { s.settings.share.notes = true; s.settings.share.v2 = true; }
+    try { const led = JSON.parse(localStorage.getItem(STORE_KEY + '.acked') || '{}') || {}; for (const k of Object.keys(led)) { const e = led[k]; if (!e || e.key !== k) continue; const b = s.bookings.find(x => x && x.key === k); if (!b) s.bookings.push(Object.assign({}, e)); else { if ((e._termsAt || 0) > (b._termsAt || 0)) { b.terms = e.terms; b._termsAt = e._termsAt; } if ((e._statusAt || 0) > (b._statusAt || 0)) { b.status = e.status; b._statusSrc = e._statusSrc; b._statusAt = e._statusAt; } if ((e._noteAt || 0) > (b._noteAt || 0)) { b.note = e.note; b._noteAt = e._noteAt; } } } } catch { /* ledger unreadable: the next save rebuilds it */ }
+    return s; }
   catch { return blank(); }
 }
-function save() {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); }
-  catch { toast('Could not save: browser storage is full or blocked.'); }
-}
+// Coordinated persistence (createPersist from the merge module): every writer re-reads
+// the stored object, merges field-by-field (mergeStates rules), writes, and reads back
+// to verify. Cross-tab exclusion uses Web Locks where present, a localStorage mutex
+// plus verify-and-retry elsewhere - the guarantee is identical on both paths.
+// save() resolves FALSE when nothing verifiably landed; callers must not ack then.
+const persister = createPersist({ storage: localStorage, locks: navigator.locks, key: STORE_KEY, ledgerKey: STORE_KEY + '.acked', onError: () => toast('Could not save: browser storage is full or blocked.') });
+function save() { return persister.save(() => S, merged => { S = merged; }); }
+function ensureDeviceId() { if (!S.settings.deviceId) S.settings.deviceId = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 let S = load();
 let view = 'places', city = 'All', q = '', groupBy = ['fav', 'rating', 'visits', 'wish'].includes(S.settings && S.settings.groupBy) ? S.settings.groupBy : '', favOnly = false, wishOnly = false, tagFilter = '', loading = false;
 favOnly = groupBy === 'fav'; wishOnly = groupBy === 'wish';
@@ -209,22 +536,26 @@ async function loadList(quiet) {
   loading = true; if (!quiet) render();
   try {
     const out = await post('/api/restaurants/list', {});
-    S.restaurants = out.restaurants; S.at = Date.now(); S.status.list = { at: S.at, ok: true, message: '' };
+    if (out.truncated) throw new Error('The restaurant list could not be loaded in full, so nothing was replaced. Your places on this phone are unchanged.');
+    const syncAt = Date.now(); S.restaurants = out.restaurants.map(r => ({ ...r, _syncAt: syncAt })); S.at = syncAt; S.status.list = { at: S.at, ok: true, message: '' };
     try { S.visits = (await post('/api/visits/list', {})).visits || []; } catch { /* the visit log may not be set up yet: keep the copy on this phone */ }
   } catch (e) { S.status.list = { at: Date.now(), ok: false, message: e.message }; }
   loading = false; save(); render();
   if (!S.bookings.length && !S.rescanned && S.status.list && S.status.list.ok) {
-    // A new or reset phone: rebuild upcoming bookings from the confirmation emails, once.
-    const n = await scanBookings({ rescan: true, days: 120 });
+    // A new or reset phone: replay the confirmation emails into the delivery store, once.
+    // Undelivered records also live there without expiry, so this is belt-and-braces.
+    const n = await syncBookings({ rescan: true, days: 120 });
     if (n !== false) { S.rescanned = true; save(); if (n) toast(`Restored ${n} booking${n > 1 ? 's' : ''} from your email`); }
-  } else scanBookings();
+  } else syncBookings();
 }
 
 const find = id => S.restaurants.find(r => r.id === id);
 // Changes show at once and are written to Notion in the background; if Notion refuses, you are told and the change stays on this phone only.
 async function upd(id, fields) {
   const r = find(id); if (!r) return;
-  Object.assign(r, fields); save();
+  Object.assign(r, fields);
+  r._uAt = r._uAt || {}; for (const f of ['myNotes', 'rating']) if (f in fields) r._uAt[f] = Date.now();
+  save();
   if (!connected()) return;
   try { const out = await post('/api/restaurants/update', { id, fields }); Object.assign(r, out.restaurant); save(); }
   catch (e) { toast('Not saved to Notion: ' + e.message); }
@@ -312,10 +643,10 @@ function bookingsHtml() {
   const row = (b, btns) => `<div class="bk"><div><b>${esc(b.name)}</b><div class="when">${esc(dateLabel(b.date))} · ${esc(b.time)} · ${b.party} ${b.party > 1 ? 'people' : 'person'}</div></div><div class="chips">${btns}</div></div>`;
   return `<div class="hd"><h1>Bookings</h1></div><div class="stack">
     ${ask.length ? `<div class="card"><h3>Did you go?</h3>${ask.map(b => row(b, `<button class="chip" data-act="went" data-id="${b.id}">Yes ✓</button><button class="chip" data-act="cancel" data-id="${b.id}">No</button>`)).join('')}</div>` : ''}
-    ${visibleReqs().length ? `<div class="card"><h3>Requests</h3>${visibleReqs().slice(0, 5).map(x => `<div class="bk"><div><b>${esc(x.name)}</b><div class="when">${esc(dateLabel(x.date))} · ${esc(x.time)} · ${x.party} · ${x.kind === 'Book' ? 'booking' : 'checking'} · ${esc(x.status.toLowerCase())}</div></div><div class="chips"><button class="chip" data-act="openreq" data-id="${esc(x.id)}">Open</button></div></div>`).join('')}</div>` : ''}
+    ${visibleReqs().length ? `<div class="card"><h3>Requests</h3>${visibleReqs().slice(0, 5).map(x => `<div class="bk"><div><b>${esc(x.name)}</b><div class="when">${esc(dateLabel(x.date))} · ${esc(x.time)} · ${x.party} · ${x.kind === 'Book' ? 'booking' : 'checking'} · ${esc(x.status.toLowerCase())}</div>${x.deliveryIssue ? `<div class="when warnt">${esc(x.deliveryIssue)}</div>` : ''}</div><div class="chips"><button class="chip" data-act="openreq" data-id="${esc(x.id)}">Open</button></div></div>`).join('')}</div>` : ''}
     <div class="card"><h3>Upcoming</h3>${up.length ? up.map(b => row(b, `<button class="chip" data-act="open" data-id="${esc(b.rid)}">Details</button><button class="chip" data-act="cancel" data-id="${b.id}">Cancel</button>`)).join('') : '<p class="empty">No bookings yet. Open a restaurant and tap “Book a table”.</p>'}</div>
     ${hist.length ? `<div class="card"><h3 data-act="beentoggle" role="button" tabindex="0" style="cursor:pointer;display:flex;justify-content:space-between;align-items:baseline">Been there <span class="mu">${hist.length} ${S.settings.beenCollapsed ? '▸' : '▾'}</span></h3>${S.settings.beenCollapsed ? '' : hist.map(b => row(b, '')).join('')}</div>` : ''}
-    <p class="mu">Bookings are kept on this phone. “I booked it” also puts the table in your Google Calendar. Cancelling here does not delete the calendar event.</p></div>`;
+    <p class="mu">Bookings confirmed by Instinct arrive here directly and are kept until this phone has saved them. “I booked it” also puts the table in your Google Calendar. Cancelling here does not delete the calendar event.</p></div>`;
 }
 
 /* ---------- restaurant sheet ---------- */
@@ -348,8 +679,9 @@ function infoHtml(r) {
     ${cardOf(r) === 'Yes' ? '<p class="mu" style="margin:6px 0 0">Mesa never stores card numbers. If a booking asks for a card, Instinct can handle it with a card you have saved with Instinct, or asks you first. A deposit or no-show guarantee needs a card that stays valid until after the visit.</p>' : ''}</div>`;
 }
 const bookingNoteHtml = r => { const b = upcoming().find(x => x.rid === r.id); if (!b) return '';
+  const terms = b.terms ? `<div class="note" style="margin:0 0 6px"><b>Booking terms confirmed by Instinct:</b> ${esc(b.terms)}</div>` : '';
   return `<div style="margin:10px 0"><label class="lbl" for="bkNoteBox">Your booking · ${esc(dateLabel(b.date))} · ${esc(b.time)} · ${b.party} ${b.party > 1 ? 'people' : 'person'}</label>
-  <textarea class="field" id="bkNoteBox" data-bknote="${esc(b.id)}" rows="6" maxlength="900" placeholder="Booking terms, confirmation code…">${esc(b.note || '')}</textarea>
+  ${terms}<textarea class="field" id="bkNoteBox" data-bknote="${esc(b.id)}" rows="6" maxlength="900" placeholder="Confirmation code, your own notes…">${esc(b.note || '')}</textarea>
   <p class="mu" style="margin:4px 0 0" id="bkNoteHint">Saved when you tap away. Only kept on this phone.</p></div>`; };
 const myNotesHtml = r => `<div style="margin:10px 0"><label class="lbl" for="myNotesBox">My notes</label>
   <textarea class="field" id="myNotesBox" data-mynotes="${esc(r.id)}" rows="3" placeholder="What to order, where to sit, who to ask for…">${esc(r.myNotes || '')}</textarea>
@@ -383,23 +715,75 @@ function openRestaurant(id) {
 
 /* ---------- bookings from your confirmation emails ---------- */
 const plainName = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-async function scanBookings(opts) {
-  if (!connected() || S.demo) return;
+// Bookings arrive as DELIVERIES from the worker's transactional store: direct entries
+// from Instinct confirmations, finished booking requests, and parsed confirmation
+// emails. A delivery is acknowledged ONLY after a durable save; without the ack the
+// store keeps it and offers it again on the next open. Bookings you cancelled are sent
+// back as rejections and become durable tombstones that nothing can resurrect.
+async function syncBookings(opts) {
+  if (!connected() || S.demo) return false;
+  ensureDeviceId();
   let out;
-  try { out = await post('/api/bookings/scan', opts || {}); } catch { return false; /* Gmail not connected or offline: nothing to do */ }
-  let added = 0;
-  for (const x of out.bookings || []) {
-    const n = plainName(x.name), r = S.restaurants.find(r => { const m = plainName(r.name); return m.length > 3 && n.length > 3 && (n === m || n.includes(m) || m.includes(n)); });
-    let b = S.bookings.find(y => y.key === x.key) || (r && S.bookings.find(y => y.rid === r.id && y.date === x.date && y.time === x.time && y.status !== 'cancelled'));
-    if (x.status === 'cancelled') { if (b && b.status === 'booked') { b.status = 'cancelled'; } continue; }
-    if (b) { b.key = b.key || x.key; if (x.cal) b.cal = true; if (x.note && (!b.note || b.note === 'From your booking email')) b.note = x.note; continue; }
-    S.bookings.push({ id: 'e' + Date.now().toString(36) + added, key: x.key, rid: r ? r.id : '', name: r ? r.name : x.name, city: r ? r.city : '', date: x.date, time: x.time, party: x.party || 2, note: x.note || 'From your booking email', status: opts && opts.rescan && x.date < today() ? 'went' : 'booked', cal: !!x.cal });
-    if (r && r.wishlist === 'Want to try' && x.date >= today()) upd(r.id, { wishlist: 'Booked' });
-    added++;
+  try {
+    out = opts && opts.quick
+      ? await post('/api/bookings/deliveries', { deviceId: S.settings.deviceId })
+      : await post('/api/bookings/scan', { ...(opts || {}), deviceId: S.settings.deviceId });
+  } catch (e) { if (!(opts && opts.quick)) S.status.scan = { at: Date.now(), ok: false, message: e.message }; return false; }
+  if (out.storeError) toast('Booking delivery: ' + out.storeError);
+  if (out.storeFull) toast('The booking store is full and refusing new bookings. Tell Instinct.');
+  if (out.ambiguous) toast(`${out.ambiguous} booking email(s) need review: same restaurant and time as another booking. They stay in Gmail.`);
+  if (!(opts && opts.quick)) S.status.scan = out.ambiguous
+    ? { at: Date.now(), ok: false, message: `${out.ambiguous} booking email(s) could not be filed safely (same restaurant and time as another booking). They stay in Gmail; ask Instinct to sort them out.` }
+    : { at: Date.now(), ok: true, message: '' };
+  const applied = applyDeliveries(out.deliveries || []);
+  const ok = await save();
+  if (ok && (applied.accepted.length || applied.rejected.length)) {
+    // Ack only what is verifiably in durable storage right now: re-read it and confirm
+    // each accepted booking (or queued rejection) is really there. Anything missing is
+    // left unacknowledged; the store offers it again next open.
+    let stored = null; try { stored = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch { stored = null; }
+    const sBook = new Set(((stored && stored.bookings) || []).map(x => x.key)), sRej = new Set((stored && stored.pendingRejects) || []);
+    const accepted = stored ? applied.accepted.filter(k => sBook.has(k)) : [];
+    const rejected = stored ? applied.rejected.filter(k => sRej.has(k) || sBook.has(k)) : [];
+    if (accepted.length || rejected.length) {
+      try { await post('/api/bookings/ack', { deviceId: S.settings.deviceId, accepted, rejected }); S.pendingRejects = []; }
+      catch { /* no ack: the store keeps these deliveries pending and offers them again next open */ }
+    }
   }
-  if (out.scanned || added) { save(); render(); }
-  if (opts && opts.rescan) return added;
-  if (added) toast(added === 1 ? 'Added a booking from your email' : `Added ${added} bookings from your email`);
+  if (out.scanned || applied.added || applied.updated) render();
+  if (opts && opts.rescan) return applied.added;
+  if (applied.added) toast(applied.added === 1 ? 'Added 1 booking from Instinct' : `Added ${applied.added} bookings from Instinct`);
+  else if (applied.updated) toast(`Updated ${applied.updated} booking${applied.updated > 1 ? 's' : ''} with its details`);
+  return applied.added;
+}
+function applyDeliveries(list) {
+  const accepted = [], rejected = [...new Set(S.pendingRejects || [])];
+  let added = 0, updated = 0;
+  for (const rec of list) {
+    if (!rec || !rec.key) continue;
+    const n = plainName(rec.name), r = S.restaurants.find(x => { const m = plainName(x.name); return m.length > 3 && n.length > 3 && (n === m || n.includes(m) || m.includes(n)); });
+    let b = S.bookings.find(y => y.key === rec.key) || (r && S.bookings.find(y => !y.key && y.rid === r.id && y.date === rec.date && y.time === rec.time && (!rec.party || !y.party || y.party === rec.party)));
+    if (b && b.status === 'cancelled' && b._statusSrc === 'user') { if (!rejected.includes(rec.key)) rejected.push(rec.key); continue; }
+    if (rec.status === 'rejected') {
+      if (b && b.status === 'booked') { b.status = 'cancelled'; b._statusSrc = 'server'; b._statusAt = Date.now(); updated++; }
+      accepted.push(rec.key); continue;
+    }
+    if (rec.status === 'cancelled') {
+      if (b && b.status === 'booked') { b.status = 'cancelled'; b._statusSrc = 'server'; b._statusAt = Date.now(); updated++; }
+      accepted.push(rec.key); continue;
+    }
+    const recAt = Date.parse(rec.updatedAt) || 0;
+    if (b) {
+      if (recAt > (b._termsAt || 0) && (rec.terms || rec.party)) { if (rec.terms) { b.terms = rec.terms; b._termsAt = recAt; } if (rec.party) b.party = rec.party; updated++; }
+      b.key = b.key || rec.key; if (!b.rid && r) b.rid = r.id;
+      accepted.push(rec.key); continue;
+    }
+    const r2 = (rec.rid && S.restaurants.find(x => x.id === rec.rid)) || r;
+    S.bookings.push({ id: 'd' + Date.now().toString(36) + added, key: rec.key, rid: r2 ? r2.id : '', name: r2 ? r2.name : rec.name, city: r2 ? r2.city : '', date: rec.date, time: rec.time, party: rec.party || 2, note: '', terms: rec.terms || '', _termsAt: recAt, status: rec.status === 'went' ? 'went' : 'booked', _statusSrc: rec.source === 'agent' ? 'user' : 'server', _statusAt: recAt || Date.now(), cal: false });
+    if (r && r.wishlist === 'Want to try' && rec.date >= today()) upd(r.id, { wishlist: 'Booked' });
+    added++; accepted.push(rec.key);
+  }
+  return { accepted, rejected, added, updated };
 }
 
 /* ---------- visit log ---------- */
@@ -446,6 +830,7 @@ async function deleteVisit(vid) {
   } else if (r) {
     r.visits = Math.max(0, (r.visits || 1) - 1);
   }
+  S.tombs = S.tombs || {}; S.tombs.visits = S.tombs.visits || {}; S.tombs.visits[vid] = Date.now();
   S.visits = S.visits.filter(x => x.id !== vid); save(); render();
   if (r) openRestaurant(r.id);
 }
@@ -498,7 +883,7 @@ function openRequest(qid) {
   const when = `${dateLabel(q.date)} · ${q.time} · ${q.party} ${q.party > 1 ? 'people' : 'person'}`;
   const body = q.status === 'Pending' ? '<p class="muted">Request sent. The Mac picks it up within a few minutes, if it is on and Claude is open.</p>'
     : q.status === 'Working' ? '<p class="muted">The Mac is working on it now…</p>'
-    : q.status === 'Done' ? (book ? `<div class="okbox"><b>Booked ✓</b> ${esc(q.result)}</div><p class="mu">The confirmation email will show up under Bookings and in your calendar.</p>` : `<div class="note">${esc(q.result)}</div>`)
+    : q.status === 'Done' ? (book ? `${q.deliveryIssue ? `<div class="errbox"><b>Needs attention.</b> ${esc(q.deliveryIssue)}</div>` : ''}<div class="okbox"><b>Booked ✓</b> ${esc(q.result)}</div><p class="mu">It appears under Bookings in a moment — sent straight here, no email wait.</p>` : `<div class="note">${esc(q.result)}</div>`)
     : q.status === 'Failed' ? `<div class="errbox"><b>It did not work.</b> ${esc(q.result || 'No reason given.')}</div>`
     : '<p class="muted">Request cancelled.</p>';
   openSheet(`<h2>${book ? 'Booking' : 'Checking'} ${esc(q.name)}</h2><div class="mu">${esc(when)}</div>${body}
@@ -522,9 +907,9 @@ async function pollRequests() {
     let changed = false;
     for (const n of out.requests) {
       const x = reqs().find(y => y.id === n.id);
-      if (!x || (x.status === n.status && x.result === n.result)) continue;
-      x.status = n.status; x.result = n.result; changed = true;
-      if (n.status === 'Done' && x.kind === 'Book') { toast(`Booked ${x.name} ✓`, 'Open', () => openRequest(x.id)); setTimeout(() => scanBookings(), 45000); setTimeout(() => scanBookings(), 150000); }
+      if (!x || (x.status === n.status && x.result === n.result && (x.deliveryIssue || '') === (n.deliveryIssue || ''))) continue;
+      x.status = n.status; x.result = n.result; x.deliveryIssue = n.deliveryIssue || ''; changed = true;
+      if (n.status === 'Done' && x.kind === 'Book') { toast(x.deliveryIssue ? `${x.name}: booked, but it needs attention` : `Booked ${x.name} ✓`, 'Open', () => openRequest(x.id)); syncBookings({ quick: true }); setTimeout(() => syncBookings({ quick: true }), 45000); setTimeout(() => syncBookings(), 150000); }
       else if (n.status === 'Failed') toast(`${x.name}: it did not work`, 'Open', () => openRequest(x.id));
     }
     if (changed) { save(); render(); if (reqOpen) openRequest(reqOpen); }
@@ -806,7 +1191,8 @@ function settingsHtml() {
       <label class="lbl" for="appKey">App key</label><input class="field" id="appKey" type="password" autocomplete="off" value="${esc(S.settings.appKey)}" placeholder="paste your app key">
       <div class="actions"><button class="btn go" data-act="saveconn">Save</button><button class="btn" data-act="check">Check connection</button><button class="btn wide" data-act="reload">Reload restaurants from Notion</button></div>
       <div id="checkOut"></div>
-      ${st.list ? `<div class="${st.list.ok ? 'okbox' : 'errbox'}"><b>Restaurants</b> ${fmtAt(st.list.at)}: ${st.list.ok ? 'OK' : esc(st.list.message)}</div>` : ''}</div>
+      ${st.list ? `<div class="${st.list.ok ? 'okbox' : 'errbox'}"><b>Restaurants</b> ${fmtAt(st.list.at)}: ${st.list.ok ? 'OK' : esc(st.list.message)}</div>` : ''}
+      ${st.scan ? `<div class="${st.scan.ok ? 'okbox' : 'errbox'}"><b>Bookings</b> ${fmtAt(st.scan.at)}: ${st.scan.ok ? 'OK' : esc(st.scan.message)}</div>` : ''}</div>
     <div class="card"><h3>Your booking details</h3>
       <p class="muted" style="margin-top:0">Used in the messages Mesa writes for restaurants and for Instinct. Stays on this phone. Never put a card number here.</p>
       <label class="lbl" for="myName">Name for reservations</label><input class="field" id="myName" value="${esc(S.settings.name)}" placeholder="Your name" autocomplete="off">
@@ -899,10 +1285,12 @@ const ACT = {
   remove: async el => {
     const id = el.dataset.id, r = find(id); if (!r) return;
     const real = connected() && /^[0-9a-f-]{32,36}$/i.test(id);
-    S.restaurants = S.restaurants.filter(x => x.id !== id); save(); closeSheet(); render();
-    if (real) { try { await post('/api/restaurants/archive', { id }); } catch (e) { S.restaurants.push(r); save(); render(); toast('Not removed: ' + e.message); return; } }
+    S.restaurants = S.restaurants.filter(x => x.id !== id);
+    S.tombs = S.tombs || {}; S.tombs.restaurants = S.tombs.restaurants || {}; S.tombs.restaurants[id] = Date.now();
+    save(); closeSheet(); render();
+    if (real) { try { await post('/api/restaurants/archive', { id }); } catch (e) { delete S.tombs.restaurants[id]; S.restaurants.push(r); save(); render(); toast('Not removed: ' + e.message); return; } }
     toast('Removed from your list', 'Undo', async () => {
-      S.restaurants.push(r); save(); render();
+      delete S.tombs.restaurants[id]; S.restaurants.push(r); save(); render();
       if (real) { try { await post('/api/restaurants/archive', { id, archived: false }); } catch (e) { toast('Restored here, but Notion did not take it back: ' + e.message); } }
     });
   },
@@ -973,14 +1361,16 @@ const ACT = {
   saveedit: el => saveEdit(el.dataset.id),
   went: el => {
     const b = S.bookings.find(x => x.id === el.dataset.id), r = b && find(b.rid); if (!b) return;
-    b.status = 'went'; save(); render();
+    b.status = 'went'; b._statusSrc = 'user'; b._statusAt = Date.now(); save(); render();
     if (r) openVisit(r.id, { date: b.date });
   },
   cancel: el => {
     const b = S.bookings.find(x => x.id === el.dataset.id); if (!b) return;
     const wasCal = b.cal && b.status === 'booked' && b.date >= today();
-    b.status = 'cancelled'; save(); render();
-    toast(wasCal ? 'Cancelled here. Delete the calendar event too, and tell the restaurant.' : 'Removed.', 'Undo', () => { b.status = 'booked'; save(); render(); });
+    b.status = 'cancelled'; b._statusSrc = 'user'; b._statusAt = Date.now();
+    if (b.key) { S.pendingRejects = S.pendingRejects || []; if (!S.pendingRejects.includes(b.key)) S.pendingRejects.push(b.key); }
+    save(); render();
+    toast(wasCal ? 'Cancelled here. Delete the calendar event too, and tell the restaurant.' : 'Removed.', 'Undo', () => { b.status = 'booked'; b._statusSrc = 'user'; b._statusAt = Date.now(); S.pendingRejects = (S.pendingRejects || []).filter(k => k !== b.key); save(); render(); });
   },
   saveconn: () => { S.settings.baseUrl = $('baseUrl').value.trim(); S.settings.appKey = $('appKey').value.trim(); save(); toast('Saved'); loadList(); },
   check: async () => { S.settings.baseUrl = $('baseUrl').value.trim(); S.settings.appKey = $('appKey').value.trim(); save(); await checkConn(); },
@@ -1007,7 +1397,7 @@ document.addEventListener('change', e => {
   if (d.shid) { t.checked ? shareSel.add(d.shid) : shareSel.delete(d.shid); updateShare(); }
   else if ('shwish' in d) { shareWish = t.checked; if (!shareWish) for (const r of S.restaurants) if (r.wishlist) shareSel.delete(r.id); renderShareList(); updateShare(); }
   else if (d.shopt) { S.settings.share[d.shopt] = t.checked; save(); updateShare(); }
-  else if (d.bknote) { const b = S.bookings.find(x => x.id === d.bknote); if (b) { b.note = t.value.trim().slice(0, 900); save(); const h = $('bkNoteHint'); if (h) h.textContent = 'Saved \u2713'; } }
+  else if (d.bknote) { const b = S.bookings.find(x => x.id === d.bknote); if (b) { b.note = t.value.trim().slice(0, 900); b._noteAt = Date.now(); save(); const h = $('bkNoteHint'); if (h) h.textContent = 'Saved \u2713'; } }
   else if (d.mynotes) { const v = t.value.trim().slice(0, 1900); upd(d.mynotes, { myNotes: v }).then(() => { const h = $('myNotesHint'); if (h) h.textContent = 'Saved ✓'; }); }
 });
 document.addEventListener('keydown', e => {
