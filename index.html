@@ -231,7 +231,7 @@ async function upd(id, fields) {
 }
 
 /* ---------- list ---------- */
-const cardBadge = r => cardOf(r) === 'No' ? '<span class="badge ok">No card</span>' : cardOf(r) === 'Yes' ? '<span class="badge warn">💳 Card needed</span>' : '<span class="badge">Card: ?</span>';
+const cardBadge = r => { const c = r.card || ''; if (c === 'Yes - guarantee' || c === 'Card guarantee') return '<span class="badge warn">💳 Card guarantee required</span>'; if (c === 'Yes - deposit' || c === 'Deposit') return '<span class="badge warn">💳 Deposit required</span>'; return cardOf(r) === 'No' ? '<span class="badge ok">No card</span>' : cardOf(r) === 'Yes' ? '<span class="badge warn">💳 Card needed</span>' : '<span class="badge">Card: ?</span>'; };
 const wishBadge = r => r.wishlist ? `<span class="badge wish">🔖 ${r.wishlist === 'Booked' ? 'Booked, not been yet' : 'Not been yet'}</span>` : '';
 const autoBadge = r => autoOf(r) ? '<span class="badge ok">✓ Auto-book</span>' : '';
 const BOOK_REASONS = {
@@ -255,12 +255,12 @@ const bookState = r => {
 };
 const bookBadge = r => {
   const s = bookState(r);
-  return s === 'hands-off' ? '<span class="badge ok">✓ Hands-off</span>' : s === 'needs-you' ? '<span class="badge warn">⚠ Needs you</span>' : '<span class="badge">? Not verified</span>';
+  return s === 'hands-off' ? '<span class="badge ok">✓ Hands-free</span>' : s === 'needs-you' ? '<span class="badge warn">⚠ Needs you</span>' : '<span class="badge">? Not verified</span>';
 };
 const autoInfo = r => {
   const raw = r.autoBooking || '';
   const s = bookState(r);
-  const head = s === 'hands-off' ? '<b class="okt">✓ Hands-off</b>' : s === 'needs-you' ? '<b class="warnt">⚠ Needs you</b>' : '<b>? Not verified</b>';
+  const head = s === 'hands-off' ? '<b class="okt">✓ Hands-free</b>' : s === 'needs-you' ? '<b class="warnt">⚠ Needs you</b>' : '<b>? Not verified</b>';
   return `${head} <span class="mu">${esc(raw || 'Not checked')}</span> - ${BOOK_REASONS[raw] || 'completion not demonstrated.'}`;
 };
 const methodBadge = r => r.method && r.method !== 'Unknown' ? `<span class="badge acc">${esc(r.method)}</span>` : '<span class="badge">Method: ?</span>';
@@ -330,7 +330,7 @@ function cardNote(r) {
   const c = cardOf(r);
   if (c === 'No') return '<div class="note ok">Card required: No.</div>';
   if (c === 'Unknown') return '<div class="note">Card required: Unknown. Check whether a card or deposit is needed before you book, not after.</div>';
-  return '<div class="note warn">Card required: Yes. Mesa never stores card numbers; you type them only on the restaurant’s own page. A deposit or no-show guarantee needs a card that stays valid until after the visit.</div>';
+  return '<div class="note warn">Card required: Yes. Mesa never stores card numbers. If a booking asks for a card, Instinct can handle it with a card you have saved with Instinct, or asks you first. A deposit or no-show guarantee needs a card that stays valid until after the visit.</div>';
 }
 const infoRow = (label, html) => `<div class="inf"><span class="mu">${label}</span><span>${html}</span></div>`;
 const yn = (v, yes, no) => v === 'Yes' ? `<b class="warnt">${yes}</b>` : v === 'No' ? `<b class="okt">${no}</b>` : '<span class="mu">Unknown</span>';
@@ -345,7 +345,7 @@ function infoHtml(r) {
     ${infoRow('Card required', yn(cardOf(r), 'Yes', 'No'))}
     ${infoRow('Auto booking', autoInfo(r))}
     ${r.method && r.method !== 'Unknown' ? infoRow('Booked via', esc(r.method)) : ''}
-    ${cardOf(r) === 'Yes' ? '<p class="mu" style="margin:6px 0 0">Mesa never stores card numbers; you type them only on the restaurant’s own page. A deposit or no-show guarantee needs a card that stays valid until after the visit.</p>' : ''}</div>`;
+    ${cardOf(r) === 'Yes' ? '<p class="mu" style="margin:6px 0 0">Mesa never stores card numbers. If a booking asks for a card, Instinct can handle it with a card you have saved with Instinct, or asks you first. A deposit or no-show guarantee needs a card that stays valid until after the visit.</p>' : ''}</div>`;
 }
 const bookingNoteHtml = r => { const b = upcoming().find(x => x.rid === r.id); if (!b) return '';
   return `<div style="margin:10px 0"><label class="lbl" for="bkNoteBox">Your booking · ${esc(dateLabel(b.date))} · ${esc(b.time)} · ${b.party} ${b.party > 1 ? 'people' : 'person'}</label>
