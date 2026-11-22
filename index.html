@@ -164,7 +164,7 @@ const cardOf = r => r.cardStatus || (r.card === 'No' ? 'No' : !r.card || r.card 
 const autoOf = r => r.autoBook !== undefined ? !!r.autoBook : ['Books automatically', 'Pre-submit verified (no card)'].includes(r.autoBooking);
 const PRICES = ['', '€', '€€', '€€€', '€€€€'];
 const MEALS = ['Lunch', 'Dinner', 'Brunch'];
-const TAGS = ['Terrace', 'Sea view', 'Group-friendly', 'Kids welcome', 'Romantic', 'Special occasion', 'Casual', 'Fine dining', 'Vegetarian options', 'Dog-friendly', 'Quiet', 'Lively'];
+const TAGS = ['Outdoors', 'Sea view', 'Group-friendly', 'Kids welcome', 'Romantic', 'Special occasion', 'Casual', 'Fine dining', 'Vegetarian options', 'Dog-friendly', 'Quiet', 'Lively'];
 
 /* ---------- state ---------- */
 /* Mesa store merge rules — single source of truth.
@@ -504,7 +504,7 @@ const persister = createPersist({ storage: localStorage, locks: navigator.locks,
 function save() { return persister.save(() => S, merged => { S = merged; }); }
 function ensureDeviceId() { if (!S.settings.deviceId) S.settings.deviceId = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 let S = load();
-let view = 'places', city = 'All', q = '', groupBy = ['fav', 'rating', 'visits', 'wish'].includes(S.settings && S.settings.groupBy) ? S.settings.groupBy : '', favOnly = false, wishOnly = false, tagFilter = '', handsFreeOnly = false, loading = false;
+let view = 'places', city = 'All', q = '', groupBy = ['fav', 'wish'].includes(S.settings && S.settings.groupBy) ? S.settings.groupBy : '', favOnly = false, wishOnly = false, tagFilter = '', loading = false;
 favOnly = groupBy === 'fav'; wishOnly = groupBy === 'wish';
 const SHARE_DEFAULTS = { lang: 'en', web: true, map: true, phone: false, notes: true };
 
@@ -538,6 +538,7 @@ async function loadList(quiet) {
     const out = await post('/api/restaurants/list', {});
     if (out.truncated) throw new Error('The restaurant list could not be loaded in full, so nothing was replaced. Your places on this phone are unchanged.');
     const syncAt = Date.now(); S.restaurants = out.restaurants.map(r => ({ ...r, _syncAt: syncAt })); S.at = syncAt; S.status.list = { at: S.at, ok: true, message: '' };
+    migrateTerraceTag();
     try { S.visits = (await post('/api/visits/list', {})).visits || []; } catch { /* the visit log may not be set up yet: keep the copy on this phone */ }
   } catch (e) { S.status.list = { at: Date.now(), ok: false, message: e.message }; }
   loading = false; save(); render();
@@ -599,10 +600,10 @@ const methodBadge = r => r.method && r.method !== 'Unknown' ? `<span class="badg
 function visible() {
   const t = q.trim().toLowerCase();
   return S.restaurants
-    .filter(r => (city === 'All' || r.city === city) && (!favOnly || r.favourite) && (!wishOnly || r.wishlist) && (groupBy !== 'rating' || (!r.wishlist && scoreOf(r.id))) && (groupBy !== 'visits' || (!r.wishlist && r.visits > 0)) && (!handsFreeOnly || bookState(r) === 'hands-off') && (!tagFilter || (r.tags || []).includes(tagFilter)) && (!t || [r.name, r.area, r.cuisine, r.city, ...(r.tags || [])].join(' ').toLowerCase().includes(t)))
+    .filter(r => (city === 'All' || r.city === city) && (!favOnly || r.favourite) && (!wishOnly || r.wishlist) && (groupBy !== 'rating' || (!r.wishlist && scoreOf(r.id))) && (groupBy !== 'visits' || (!r.wishlist && r.visits > 0)) && (!tagFilter || (r.tags || []).includes(tagFilter)) && (!t || [r.name, r.area, r.cuisine, r.city, ...(r.tags || [])].join(' ').toLowerCase().includes(t)))
     .sort((a, b) => (groupBy === 'visits' ? (b.visits || 0) - (a.visits || 0) : groupBy === 'rating' ? (scoreOf(b.id) || 0) - (scoreOf(a.id) || 0) : 0) || (groupBy === 'wish' ? 0 : b.favourite - a.favourite) || a.name.localeCompare(b.name));
 }
-const GROUPS = [['fav', 'Favourites', r => !r.wishlist && r.favourite], ['rating', 'Top rated', r => !r.wishlist && scoreOf(r.id)], ['visits', 'Most visited', r => !r.wishlist && r.visits > 0], ['wish', 'To try', r => r.wishlist]];
+const GROUPS = [['fav', 'Favourites', r => !r.wishlist && r.favourite], ['wish', 'To try', r => r.wishlist]]; // Top rated / Most visited stay available under Rankings
 const groupsOf = items => [{ title: '', items }];
 function cardHtml(r) {
   const sub = [r.area, r.cuisine, r.city === 'Costa Brava' || r.city === 'Vienna' || city !== 'All' ? '' : r.city].filter(Boolean).join(' · ');
@@ -618,8 +619,6 @@ function renderList() {
     : `<p class="empty">${S.restaurants.length ? (groupBy === 'rating' ? 'No scores yet. Open a restaurant and tap a score, or log a visit.' : groupBy === 'visits' ? 'No visits logged yet. Open a restaurant and tap “Log a visit”.' : 'No restaurant matches these filters.') : connected() ? (loading ? 'Loading your restaurants…' : 'Nothing here yet. Pull the list from Notion with ⟳ or add a place with +.') : 'Open Settings to connect, or load the demo to try Mesa.'}</p>`;
 }
 
-// Only tags that at least one place has, so the filter row never shows an empty choice.
-const tagsInUse = () => TAGS.filter(t => S.restaurants.some(r => (r.tags || []).includes(t)));
 function placesHtml() {
   const count = c => S.restaurants.filter(r => c === 'All' || r.city === c).length;
   const st = S.status.list;
@@ -629,8 +628,7 @@ function placesHtml() {
     ${st && !st.ok && connected() ? `<div class="errbox" style="margin:0 0 8px">${esc(st.message)}</div>` : ''}
     <div class="scroll">${['All', ...CITIES].map(c => `<button class="chip ${city === c ? 'on' : ''}" data-act="city" data-v="${c}">${c}<small>${count(c)}</small></button>`).join('')}</div>
     <input class="search" id="q" type="search" placeholder="Search name, area or cuisine" value="${esc(q)}" autocomplete="off">
-    <div class="chips" style="margin-bottom:${tagsInUse().length ? '8px' : '10px'}">${GROUPS.map(([k, l, f]) => `<button class="chip ${groupBy === k ? 'on' : ''}" data-act="group" data-v="${k}">${k === 'fav' ? '★ ' : k === 'wish' ? '🔖 ' : ''}${l}<small>${S.restaurants.filter(f).length}</small></button>`).join('')}<button class="chip ${handsFreeOnly ? 'on' : ''}" data-act="handsfree">✓ Hands-free<small>${S.restaurants.filter(r => bookState(r) === 'hands-off').length}</small></button></div>
-    ${tagsInUse().length ? `<div class="scroll" style="margin-bottom:10px">${tagsInUse().map(t => `<button class="chip ${tagFilter === t ? 'on' : ''}" data-act="tag" data-v="${esc(t)}">${esc(t)}</button>`).join('')}</div>` : ''}
+    <div class="chips" style="margin-bottom:10px">${GROUPS.map(([k, l, f]) => `<button class="chip ${groupBy === k ? 'on' : ''}" data-act="group" data-v="${k}">${k === 'fav' ? '★ ' : '🔖 '}${l}<small>${S.restaurants.filter(f).length}</small></button>`).join('')}<button class="chip ${tagFilter === 'Outdoors' ? 'on' : ''}" data-act="tag" data-v="Outdoors">Outdoors<small>${S.restaurants.filter(r => (r.tags || []).includes('Outdoors')).length}</small></button></div>
     <div id="list"></div>`;
 }
 
@@ -692,6 +690,7 @@ function openRestaurant(id) {
   openSheet(`<div class="hd" style="margin:0 0 4px"><div><h2>${esc(r.name)}</h2><div class="mu">${esc([r.area, r.cuisine, r.city, r.price].filter(Boolean).join(' · '))}</div></div>
       ${r.wishlist ? '' : `<button class="star ${r.favourite ? 'on' : ''}" data-act="star" data-id="${esc(id)}" data-sheet="1" aria-label="Favourite">★</button>`}</div>
     <div class="badges">${bookBadge(r)}${wishBadge(r)}${methodBadge(r)}${cardBadge(r)}${(r.meals || []).map(m => `<span class="badge">${esc(m)}</span>`).join('')}${(r.tags || []).map(t => `<span class="badge tag">${esc(t)}</span>`).join('')}</div>
+    <div class="chips" style="margin:10px 0 2px"><button class="chip ${(r.tags || []).includes('Outdoors') ? 'on' : ''}" data-act="tagtoggle" data-id="${esc(id)}">☀ Outdoors</button></div>
     ${r.wishlist ? `<div class="note warn">You have not been here yet${r.added ? ` · added ${esc(dateLabel(r.added))}` : ''}.${r.why ? `<br>${esc(r.why)}` : ''}</div>
       <div class="seg">${['Want to try', 'Booked'].map(w => `<button class="${r.wishlist === w ? 'on' : ''}" data-act="wstatus" data-id="${esc(id)}" data-v="${w}">${w}</button>`).join('')}</div>` : ''}
     ${infoHtml(r)}
@@ -1135,7 +1134,7 @@ function shareText() {
 }
 function defaultShare(only) {
   if (only) return [only];
-  const filtered = !!(q.trim() || city !== 'All' || favOnly || wishOnly || tagFilter || handsFreeOnly);
+  const filtered = !!(q.trim() || city !== 'All' || favOnly || wishOnly || tagFilter);
   let base = visible();
   if (!filtered) base = base.filter(r => r.favourite && !r.wishlist);
   return base.map(r => r.id);
@@ -1223,7 +1222,7 @@ async function checkConn() {
   } catch (e) { out.innerHTML = `<div class="errbox">${esc(e.message)}</div>`; }
 }
 
-const DEMO_TAGS = { 'Far Nomo': ['Sea view', 'Terrace', 'Special occasion'], 'Filandón': ['Casual', 'Group-friendly'], 'Carbo': ['Terrace', 'Lively'] };
+const DEMO_TAGS = { 'Far Nomo': ['Sea view', 'Outdoors', 'Special occasion'], 'Filandón': ['Casual', 'Group-friendly'], 'Carbo': ['Outdoors', 'Lively'] };
 const DEMO = [
   ['Far Nomo', 'Costa Brava', 'Llafranc', 'Japanese', 'CoverManager', 'https://example.com/far-nomo', '', '+34972300000', '', 'Unknown', true],
   ['Filandón', 'Madrid', '', 'Spanish', 'Own website', 'https://example.com/filandon', '', '+34910000001', '+34600000001', 'No', true],
@@ -1268,8 +1267,8 @@ const ACT = {
   tab: el => { view = el.dataset.v; closeSheet(); render(); window.scrollTo(0, 0); },
   city: el => { city = el.dataset.v; render(); },
   group: el => { groupBy = groupBy === el.dataset.v ? '' : el.dataset.v; favOnly = groupBy === 'fav'; wishOnly = groupBy === 'wish'; S.settings.groupBy = groupBy; save(); render(); },
-  handsfree: () => { handsFreeOnly = !handsFreeOnly; render(); },
   tag: el => { tagFilter = tagFilter === el.dataset.v ? '' : el.dataset.v; render(); },
+  tagtoggle: el => { const id = el.dataset.id, r = find(id); if (!r) return; const t = (r.tags || []).slice(); const i = t.indexOf('Outdoors'); if (i >= 0) t.splice(i, 1); else t.push('Outdoors'); upd(id, { tags: t }); openRestaurant(id); render(); },
   wstatus: el => { upd(el.dataset.id, { wishlist: el.dataset.v }); openRestaurant(el.dataset.id); render(); },
   been: el => {
     const id = el.dataset.id, r = find(id); if (!r) return;
@@ -1427,11 +1426,24 @@ async function handleShare() {
   } catch (e) { toast('Could not add it: ' + e.message); }
 }
 
+// Terrace tag renamed to Outdoors (Nov 2026, approved). Runs after every successful list
+// fetch and once at boot, through upd() - the same path an edit-screen save uses - so the
+// rename lands in Notion and converges everywhere. Idempotent: a fetch that still carries
+// 'Terrace' (update still in flight or refused) is renamed and re-synced again.
+function migrateTerraceTag() {
+  for (const r of S.restaurants) {
+    const t = r.tags || [], i = t.indexOf('Terrace');
+    if (i < 0) continue;
+    t.splice(i, 1); if (!t.includes('Outdoors')) t.push('Outdoors');
+    upd(r.id, { tags: t });
+  }
+  render();
+}
 render();
-loadList(true);
+loadList(true).then(migrateTerraceTag);
 startPolling();
 handleShare();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
 </body>
-  </html>
+</html>
