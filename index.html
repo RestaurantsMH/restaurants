@@ -132,6 +132,13 @@ textarea.field { min-height: 70px; resize: vertical; }
 .toast > div { pointer-events: auto; background: var(--ink); color: var(--bg); border-radius: 12px; padding: 10px 14px; font-size: 14px; display: flex; gap: 12px; align-items: center; max-width: 520px; }
 .toast button { border: 0; background: none; color: var(--acc); font-weight: 700; padding: 0; }
 .back { border: 0; background: none; color: var(--muted); padding: 4px 0; font-size: 15px; }
+
+.listjump { position: sticky; top: 0; z-index: 4; background: var(--bg); display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.listjump button { min-height: 44px; color: var(--acc); font-size: 13px; padding: 8px 14px; }
+.letterheading { scroll-margin-top: 70px; font-size: 15px; color: var(--ink); display: flex; justify-content: space-between; margin-top: 12px; }
+.lettergrid { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; }
+.lettergrid .btn { padding:10px 0; min-height:48px; color:var(--acc); }
+.lettergrid .btn:disabled { color:var(--muted); opacity:.3; cursor:default; }
 </style>
 </head>
 <body>
@@ -601,10 +608,18 @@ function visible() {
   const t = q.trim().toLowerCase();
   return S.restaurants
     .filter(r => (city === 'All' || r.city === city) && (!favOnly || r.favourite) && (!wishOnly || r.wishlist) && (groupBy !== 'rating' || (!r.wishlist && scoreOf(r.id))) && (groupBy !== 'visits' || (!r.wishlist && r.visits > 0)) && (!tagFilter || (r.tags || []).includes(tagFilter)) && (!t || [r.name, r.area, r.cuisine, r.city, ...(r.tags || [])].join(' ').toLowerCase().includes(t)))
-    .sort((a, b) => (groupBy === 'visits' ? (b.visits || 0) - (a.visits || 0) : groupBy === 'rating' ? (scoreOf(b.id) || 0) - (scoreOf(a.id) || 0) : 0) || (groupBy === 'wish' ? 0 : b.favourite - a.favourite) || a.name.localeCompare(b.name));
+    .sort((a, b) => (groupBy === 'visits' ? (b.visits || 0) - (a.visits || 0) : groupBy === 'rating' ? (scoreOf(b.id) || 0) - (scoreOf(a.id) || 0) : 0) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }));
 }
 const GROUPS = [['fav', 'Favourites', r => !r.wishlist && r.favourite], ['wish', 'To try', r => r.wishlist]]; // Top rated / Most visited stay available under Rankings
-const groupsOf = items => [{ title: '', items }];
+const letterOf = r => {
+  const initial = r.name.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').charAt(0).toUpperCase();
+  return /^[A-Z]$/.test(initial) ? initial : '#';
+};
+const groupsOf = items => Array.from(new Set(items.map(letterOf))).map(letter => ({ title: letter, items: items.filter(r => letterOf(r) === letter) }));
+function openLetters() {
+ const letters = new Set(visible().map(letterOf));
+ openSheet(`<h2>Jump to letter</h2><p class="mu" style="margin:4px 0 14px">Letters in your current list</p><div class="lettergrid">${'ABCDEFGHIJKLMNOPQRSTUVWXYZ#'.split('').map(l => `<button class="btn" data-act="letter" data-v="${l}" ${letters.has(l) ? '' : 'disabled'}>${l}</button>`).join('')}</div><button class="btn block" style="margin-top:12px" data-act="close">Cancel</button>`);
+}
 function cardHtml(r) {
   const sub = [r.area, r.cuisine, r.city === 'Costa Brava' || r.city === 'Vienna' || city !== 'All' ? '' : r.city].filter(Boolean).join(' · ');
   return `<div class="rc ${r.wishlist ? 'wish' : ''}" role="button" tabindex="0" data-act="open" data-id="${esc(r.id)}"><div class="top"><div class="nm"><b>${esc(r.name)}</b><span>${esc(sub || r.city)}</span></div>
@@ -615,7 +630,7 @@ function cardHtml(r) {
 }
 function renderList() {
   const items = visible(), el = $('list'); if (!el) return;
-  el.innerHTML = items.length ? groupsOf(items).map(g => (g.title ? `<div class="grouphd">${esc(g.title)} · ${g.items.length}</div>` : '') + g.items.map(cardHtml).join('')).join('')
+  el.innerHTML = items.length ? `<div class="listjump"><span class="mu">${items.length} places · A–Z</span><button class="pill" data-act="letters">Jump to letter ↓</button></div>` + groupsOf(items).map(g => (g.title ? `<div class="grouphd letterheading" id="letter-${esc(g.title)}">${esc(g.title)} <span class="mu">${g.items.length}</span></div>` : '') + g.items.map(cardHtml).join('')).join('')
     : `<p class="empty">${S.restaurants.length ? (groupBy === 'rating' ? 'No scores yet. Open a restaurant and tap a score, or log a visit.' : groupBy === 'visits' ? 'No visits logged yet. Open a restaurant and tap “Log a visit”.' : 'No restaurant matches these filters.') : connected() ? (loading ? 'Loading your restaurants…' : 'Nothing here yet. Pull the list from Notion with ⟳ or add a place with +.') : 'Open Settings to connect, or load the demo to try Mesa.'}</p>`;
 }
 
@@ -1264,6 +1279,8 @@ function toast(msg, label, fn) {
 
 /* ---------- events ---------- */
 const ACT = {
+  letters: () => openLetters(),
+  letter: el => { const target = document.getElementById('letter-' + el.dataset.v); closeSheet(); if (target) target.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' }); },
   tab: el => { view = el.dataset.v; closeSheet(); render(); window.scrollTo(0, 0); },
   city: el => { city = el.dataset.v; render(); },
   group: el => { groupBy = groupBy === el.dataset.v ? '' : el.dataset.v; favOnly = groupBy === 'fav'; wishOnly = groupBy === 'wish'; S.settings.groupBy = groupBy; save(); render(); },
@@ -1446,4 +1463,4 @@ handleShare();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
 </body>
-</html>
+  </html>
